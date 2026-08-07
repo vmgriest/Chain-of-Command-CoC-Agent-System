@@ -1,0 +1,84 @@
+{
+  "_comment": "Copy to company_config.json and edit. Everything below is read at startup by backend/config/loader.py — no orchestration code changes needed to onboard a company.",
+
+  "company": {
+    "name": "Acme Robotics",
+    "domain": "acme.com",
+    "website": "https://acme.com",
+    "support_scope": ["orders", "returns", "hardware troubleshooting"]
+  },
+
+  "personas": {
+    "front_desk": {
+      "name": "Penny",
+      "title": "Front Desk Associate",
+      "theme": "slate"
+    },
+    "manager": {
+      "name": "Dwight",
+      "title": "Support Manager",
+      "theme": "amber"
+    },
+    "vice_president": {
+      "name": "Shiv",
+      "title": "VP of Customer Success",
+      "theme": "indigo"
+    },
+    "ceo": {
+      "name": "Jensen Huang",
+      "title": "Chief Executive Officer",
+      "theme": "obsidian"
+    }
+  },
+
+  "models": {
+    "front_desk": "llama3.2:3b",
+    "manager": "qwen2.5:7b",
+    "vice_president": "qwen2.5:14b",
+    "ceo": "qwen2.5:32b",
+    "embedding": "nomic-embed-text"
+  },
+
+  "knowledge": {
+    "documents": ["./docs/handbook.pdf", "./docs/policies/"],
+    "crawl_urls": ["https://acme.com/support", "https://acme.com/docs"],
+    "qdrant_collection": "acme_support"
+  },
+
+  "mcp_servers": {
+    "internal": [
+      {
+        "name": "orders",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": ["acme-orders-mcp"],
+        "tiers": ["manager", "vice_president", "ceo"]
+      }
+    ],
+    "external": [
+      {
+        "name": "web_search",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "tiers": ["vice_president", "ceo"]
+      },
+      {
+        "name": "crm",
+        "transport": "http",
+        "url": "https://mcp.acme.com/crm",
+        "tiers": ["ceo"]
+      }
+    ]
+  },
+
+  "escalation": {
+    "require_user_consent": true,
+    "max_attempts_per_tier": 3,
+    "human_admin": {
+      "email": "support-lead@acme.com",
+      "push_topic": "acme-escalations",
+      "scheduling_link": "https://cal.acme.com/acme-support"
+    }
+  }
+}

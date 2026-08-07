@@ -1,0 +1,34 @@
+# --- secrets & per-company config ---
+# company_config.json is real customer configuration. Only the example is tracked.
+company_config.json
+.env
+.env.local
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# --- node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# --- local data ---
+qdrant_storage/
+ollama_data/
+*.log
+
+# --- editors / os ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

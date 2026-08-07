@@ -1,0 +1,32 @@
+# Local dev infrastructure. Backend and frontend run on the host during development.
+#
+# Usage: docker compose up -d
+# TODO(M3): add the sandboxed MCP runner network here — an internal-only bridge
+#           with egress restricted to the endpoints declared in company_config.json.
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: coc-qdrant
+    ports:
+      - "6333:6333" # REST
+      - "6334:6334" # gRPC
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # Ollama runs on the host by default (better GPU access on Windows).
+  # Uncomment to containerize instead — then set OLLAMA_BASE_URL=http://ollama:11434
+  #
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: coc-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ./ollama_data:/root/.ollama
+  #   restart: unless-stopped
+
+# TODO(M2/M3): the code-execution sandbox and stdio MCP servers are spawned
+#   on demand by backend/mcp/sandbox.py, not declared here — they are per-session
+#   containers with dropped capabilities, not long-lived services.

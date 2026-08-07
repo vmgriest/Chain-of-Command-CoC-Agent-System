@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Per-tier theming is driven by CSS custom properties set on a root wrapper by
+   themes/applyTheme(). Defaults below are the Front Desk (slate) values, so the
+   first paint is correct before config loads.
+
+   TODO(M1): fill in real values, matching THEMES.slate in src/themes/index.ts. */
+:root {
+  --tier-bg: ;
+  --tier-surface: ;
+  --tier-accent: ;
+  --tier-text: ;
+  --tier-muted: ;
+
+  /* Cross-fade duration for the escalation transition. Coordinated with
+     useEscalation's sequence — change both together. */
+  --tier-transition-ms: 400ms;
+}
+
+/* TODO(M1): transition background-color / border-color / color on themed
+   elements using --tier-transition-ms, so the theme swap animates rather than
+   snapping. */
+
+@media (prefers-reduced-motion: reduce) {
+  /* TODO(M1): zero out transitions. The divider and its content still render —
+     only the motion is optional. */
+}
