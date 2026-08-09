@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from functools import lru_cache
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from backend.config.schema import CompanyConfig
 
 DEFAULT_CONFIG_PATH = Path("company_config.json")
+EXAMPLE_CONFIG_PATH = Path("company_config.example.json")
 
 
 class ConfigError(RuntimeError):
@@ -25,8 +29,14 @@ class ConfigError(RuntimeError):
     """
 
 
+def config_path_from_env() -> Path:
+    """Read COMPANY_CONFIG_PATH, fall back to DEFAULT_CONFIG_PATH."""
+    raw = os.environ.get("COMPANY_CONFIG_PATH")
+    return Path(raw) if raw else DEFAULT_CONFIG_PATH
+
+
 def load_config(path: Path | None = None) -> CompanyConfig:
-    """TODO(M1): read JSON from `path` (or COMPANY_CONFIG_PATH env, or the default).
+    """Read JSON from `path` (or COMPANY_CONFIG_PATH env, or the default).
 
     Steps:
       1. Resolve the path; raise ConfigError with a pointer to
@@ -36,28 +46,85 @@ def load_config(path: Path | None = None) -> CompanyConfig:
       4. Validate into CompanyConfig; convert ValidationError into a ConfigError
          that reads like advice, not a stack trace.
     """
-    raise NotImplementedError
+    resolved = path if path is not None else config_path_from_env()
+
+    if not resolved.exists():
+        msg = (
+            f"Company config not found at {resolved!s}. "
+            f"Copy {EXAMPLE_CONFIG_PATH!s} to {resolved!s} and edit it, "
+            f"or set COMPANY_CONFIG_PATH to point elsewhere."
+        )
+        raise ConfigError(msg)
+
+    raw_text = resolved.read_text(encoding="utf-8")
+    try:
+        raw = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        msg = (
+            f"Could not parse {resolved!s} as JSON: {exc.msg} "
+            f"(line {exc.lineno}, column {exc.colno})"
+        )
+        raise ConfigError(msg) from exc
+
+    if isinstance(raw, dict):
+        raw.pop("_comment", None)
+
+    try:
+        return CompanyConfig.model_validate(raw)
+    except ValidationError as exc:
+        lines = [f"Invalid config at {resolved!s}:"]
+        for err in exc.errors():
+            loc = ".".join(str(p) for p in err["loc"])
+            lines.append(f"  - {loc}: {err['msg']}")
+        raise ConfigError("\n".join(lines)) from exc
 
 
 @lru_cache(maxsize=1)
 def get_config() -> CompanyConfig:
-    """TODO(M1): cached accessor used everywhere else in the codebase.
+    """Cached accessor used everywhere else in the codebase.
 
     TODO(M5): config hot reload — expose reload_config() that clears this cache
     and re-runs the MCP registry wiring. Note that changing model ids mid-session
     would swap an agent's brain underneath a live conversation; decide whether
     reload applies to new sessions only.
     """
-    raise NotImplementedError
+    return load_config()
 
 
-def config_path_from_env() -> Path:
-    """TODO(M1): read COMPANY_CONFIG_PATH, fall back to DEFAULT_CONFIG_PATH."""
-    raise NotImplementedError
+def startup_checks(config: CompanyConfig) -> list[str]:
+    """Non-fatal warnings surfaced at boot: models not pulled in Ollama, document
+    paths that do not exist, MCP binaries not on PATH. Better to warn loudly at
+    startup than to fail on a customer's third message.
+    """
+    warnings: list[str] = []
 
+    model_ids = {
+        config.models.front_desk,
+        config.models.manager,
+        config.models.vice_president,
+        config.models.ceo,
+    }
+    try:
+        import ollama as ollama_client
 
-# TODO(M0): startup_checks(config) -> list[str]
-#   Non-fatal warnings surfaced at boot: models not pulled in Ollama, document
-#   paths that do not exist, MCP binaries not on PATH. Better to warn loudly at
-#   startup than to fail on a customer's third message.
-_ = (os, json)  # imports staged for the implementations above
+        available = {m.model for m in ollama_client.list().models}
+        for model_id in sorted(model_ids):
+            if model_id not in available:
+                warnings.append(
+                    f"Model {model_id!r} not found via `ollama list` — pull it "
+                    f"before the first customer message ({config.company.name})."
+                )
+    except Exception as exc:  # noqa: BLE001 - startup warning must never crash boot
+        warnings.append(f"Could not reach Ollama to verify models are pulled: {exc}")
+
+    for doc_path in config.knowledge.documents:
+        if not Path(doc_path).exists():
+            warnings.append(f"Knowledge document path does not exist: {doc_path}")
+
+    for server in config.mcp_servers.all_servers():
+        if server.transport == "stdio" and server.command and shutil.which(server.command) is None:
+            warnings.append(
+                f"MCP server {server.name!r}: binary {server.command!r} not found on PATH"
+            )
+
+    return warnings

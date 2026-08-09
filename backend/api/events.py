@@ -10,9 +10,9 @@ a token stream would be fragile and untestable.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter
 
 from backend.config.schema import Tier
 
@@ -104,6 +104,15 @@ class ErrorEvent(BaseModel):
     recoverable: bool = True
 
 
+class TurnEndEvent(BaseModel):
+    """The current turn's streaming is done — whether it ended normally or
+    paused at an interrupt. The client stops treating the in-progress message
+    bubble as streaming. Explicit rather than inferred: the client cannot tell
+    "no more tokens yet" from "no more tokens ever" without this."""
+
+    type: Literal["turn_end"] = "turn_end"
+
+
 # ---------------------------------------------------------------------------
 # Client -> server
 # ---------------------------------------------------------------------------
@@ -128,6 +137,33 @@ class ContextResponse(BaseModel):
     answer: str
 
 
-# TODO(M1): ServerEvent / ClientEvent discriminated unions on `type`.
-# TODO(M1): parse_client_event(raw) -> ClientEvent, rejecting unknown types
-#   with an ErrorEvent rather than a 500.
+ServerEvent = (
+    TokenEvent
+    | AgentIntroEvent
+    | TierChangeEvent
+    | EscalationPromptEvent
+    | ContextRequestEvent
+    | HumanEscalationEvent
+    | ErrorEvent
+    | TurnEndEvent
+)
+
+ClientEvent = Annotated[
+    UserMessage | EscalationResponse | ContextResponse,
+    Field(discriminator="type"),
+]
+
+_client_event_adapter: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
+
+
+def parse_client_event(raw: dict) -> ClientEvent | None:
+    """Parse an inbound WS message into a typed ClientEvent.
+
+    Returns None for anything that doesn't validate — the caller sends an
+    ErrorEvent back over the wire rather than letting a bad payload 500 the
+    connection.
+    """
+    try:
+        return _client_event_adapter.validate_python(raw)
+    except Exception:  # noqa: BLE001 - any malformed payload maps to None
+        return None

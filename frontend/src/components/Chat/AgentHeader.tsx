@@ -6,18 +6,92 @@
  * matter and they are not the same thing.
  */
 
-// TODO(M1): AgentHeader
-//   - Avatar / monogram, themed per tier
-//   - Persona name (from config) and title
-//   - Tier badge with the rung label
-//   - Optional ladder indicator (● ● ○ ○) showing position and headroom
-//
-// TODO(M1): animate name and badge on tier change, coordinated with
-//   useEscalation's sequence — the header must not swap before the divider lands.
-//
-// TODO(M1): connection status indicator lives here. On reconnect, show it
-//   without wiping the conversation — a dropped socket is not a lost session.
+import { AnimatePresence, motion } from 'framer-motion';
 
-export function AgentHeader(): JSX.Element {
-  throw new Error('not implemented');
+import { useChatStore } from '@/store/chat';
+import { TIER_LABELS, type Theme } from '@/themes';
+import { TIER_ORDER } from '@/types';
+
+interface AgentHeaderProps {
+  theme: Theme;
+  transitioning: boolean;
+  connected: boolean;
+  reconnecting: boolean;
+}
+
+export function AgentHeader({
+  theme,
+  transitioning,
+  connected,
+  reconnecting,
+}: AgentHeaderProps): JSX.Element {
+  const currentTier = useChatStore((s) => s.currentTier);
+  const currentPersona = useChatStore((s) => s.currentPersona);
+  const config = useChatStore((s) => s.config);
+
+  const persona = config?.personas[currentTier];
+  const displayName = currentPersona || persona?.name || '';
+  const title = persona?.title ?? '';
+  const initial = displayName ? displayName[0] : '?';
+  const position = TIER_ORDER.indexOf(currentTier);
+
+  return (
+    <header className="theme-surface flex items-center justify-between gap-3 border-b px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div
+          className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${theme.avatarClass}`}
+        >
+          {initial}
+        </div>
+        <AnimatePresence mode="wait">
+          {/* The header must not swap before the tier_change divider lands —
+              gating on `transitioning` (owned by useEscalation) keeps them in
+              step rather than racing on independent state. */}
+          {!transitioning && (
+            <motion.div
+              key={currentTier}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.25 }}
+            >
+              <div className="font-semibold leading-tight">{displayName}</div>
+              <div className="theme-muted text-xs leading-tight">{title}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="hidden items-center gap-1 sm:flex" aria-hidden="true">
+          {TIER_ORDER.map((tier, i) => (
+            <span
+              key={tier}
+              className="h-1.5 w-1.5 rounded-full"
+              style={{
+                backgroundColor: i <= position ? theme.accent : 'transparent',
+                border: `1px solid ${theme.accent}`,
+                opacity: i <= position ? 1 : 0.4,
+              }}
+            />
+          ))}
+        </div>
+        <span
+          className="theme-accent rounded-full border px-2 py-0.5 text-xs font-medium"
+          style={{ borderColor: theme.accent }}
+        >
+          {TIER_LABELS[currentTier]}
+        </span>
+        {reconnecting ? (
+          <span className="text-xs text-amber-600" role="status">
+            Reconnecting…
+          </span>
+        ) : !connected ? (
+          <span className="text-xs text-red-600" role="status">
+            Offline
+          </span>
+        ) : null}
+      </div>
+    </header>
+  );
 }

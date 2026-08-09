@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from backend.config.loader import get_config
 from backend.config.schema import Tier
+from backend.graph.tiers.base import build_tier
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -24,22 +26,42 @@ systems. When a question needs live external data, escalate to the VP.
 
 
 def build(model_id: str) -> CompiledStateGraph:
-    """TODO(M1): build_tier(Tier.MANAGER, persona, model_id, tools=stub_tools(), ...)
+    """build_tier(Tier.MANAGER, persona, model_id, tools=stub_tools(), ...)
     TODO(M2): swap stub_tools() for real_tools()."""
-    raise NotImplementedError
+    persona = get_config().personas.manager
+    return build_tier(Tier.MANAGER, persona, model_id, stub_tools(), CAPABILITY_DESCRIPTION)
 
 
 def stub_tools() -> list[BaseTool]:
-    """TODO(M1): obviously-fake tools so the tool-calling plumbing is exercised
-    in the vertical slice before RAG exists.
+    """Obviously-fake tools so the tool-calling plumbing is exercised in the
+    vertical slice before RAG exists.
 
       lookup_order(order_id)   -> hardcoded fake order
       check_policy(topic)      -> hardcoded fake policy text
 
-    Make the fakeness visible in the returned data (e.g. "STUB:") so a demo never
+    The fakeness is visible in the returned data ("STUB:") so a demo never
     accidentally passes off stub output as real.
     """
-    raise NotImplementedError
+    from langchain_core.tools import tool
+
+    @tool
+    def lookup_order(order_id: str) -> str:
+        """Look up an order by its order ID and return its status."""
+        return (
+            f"STUB: order {order_id} — status: shipped, carrier: FakeShip, "
+            f"eta: 3 business days. (This is placeholder data; real order lookup "
+            f"lands in M2.)"
+        )
+
+    @tool
+    def check_policy(topic: str) -> str:
+        """Look up the company policy on a given topic (e.g. 'returns', 'warranty')."""
+        return (
+            f"STUB: policy on {topic!r} — standard 30-day window applies. "
+            f"(This is placeholder data; real policy RAG lands in M2.)"
+        )
+
+    return [lookup_order, check_policy]
 
 
 def real_tools() -> list[BaseTool]:

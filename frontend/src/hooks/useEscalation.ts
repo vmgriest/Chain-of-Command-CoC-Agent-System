@@ -5,35 +5,85 @@
  * they moved up, not stalled. It gets more care than a theme swap normally would.
  */
 
+import { useEffect, useRef, useState } from 'react';
+
+import { useChatStore } from '@/store/chat';
+import { getTheme } from '@/themes';
 import type { Theme } from '@/themes';
-import type { Tier } from '@/types';
+import type { ClientEvent, Tier } from '@/types';
 
-// TODO(M1): useEscalation() -> { currentTier, theme, transitioning, respondToEscalation }
-//
-//   Transition sequence on a tier_change event:
-//     1. transitioning = true
-//     2. Fade the outgoing agent's header (~200ms)
-//     3. Animate in the TierTransition divider — from/to personas plus
-//        packet_summary, so the handoff is legible rather than implied
-//     4. Cross-fade the CSS custom properties (~400ms)
-//     5. Stream in the new agent's introduction
-//     6. transitioning = false
-//
-//   Total ~800ms. Long enough to register as an event, short enough not to feel
-//   like the app hung.
-//
-// TODO(M1): respect prefers-reduced-motion — skip the animation, keep the
-//   divider and the theme change. The information must survive; only the motion
-//   is optional.
-//
-// TODO(M1): block user input while transitioning. A message sent mid-handoff has
-//   an ambiguous destination.
+const TRANSITION_MS = 800;
 
-export function useEscalation(): {
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+/** Tracks the escalation transition: theme swap and animation sequencing.
+ *
+ * On a tier_change event (reflected here as currentTier changing in the
+ * store), `transitioning` flips true for ~800ms so the UI can fade the old
+ * header, animate in the TierTransition divider, and cross-fade the themed
+ * surfaces before settling on the new tier — long enough to register as an
+ * event, short enough not to feel like the app hung. `theme` updates
+ * immediately (CSS custom properties transition on their own via
+ * --tier-transition-ms), so the color shift and the "transitioning" flag are
+ * independent: components block input on the flag, not on the color.
+ *
+ * `send` is threaded in from useWebSocket so respondToEscalation can resume
+ * the paused graph directly.
+ */
+export function useEscalation(send: (event: ClientEvent) => void): {
   currentTier: Tier;
   theme: Theme;
   transitioning: boolean;
   respondToEscalation: (approved: boolean) => void;
 } {
-  throw new Error('not implemented');
+  const currentTier = useChatStore((s) => s.currentTier);
+  const clearPendingEscalation = useChatStore((s) => s.clearPendingEscalation);
+  const [transitioning, setTransitioning] = useState(false);
+  const previousTierRef = useRef(currentTier);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (previousTierRef.current === currentTier) {
+      return;
+    }
+    previousTierRef.current = currentTier;
+
+    if (prefersReducedMotion()) {
+      // The divider and theme change still render; only the motion is
+      // optional, so there is nothing to time here.
+      return;
+    }
+
+    setTransitioning(true);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => setTransitioning(false), TRANSITION_MS);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [currentTier]);
+
+  const respondToEscalation = (approved: boolean): void => {
+    send({ type: 'escalation_response', approved });
+    clearPendingEscalation();
+  };
+
+  const config = useChatStore((s) => s.config);
+  const themeName = config?.personas[currentTier]?.theme ?? 'slate';
+
+  return {
+    currentTier,
+    theme: getTheme(themeName),
+    transitioning,
+    respondToEscalation,
+  };
 }

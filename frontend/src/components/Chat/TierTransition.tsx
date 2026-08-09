@@ -6,25 +6,55 @@
  * ladder rather than a flat transcript that mysteriously changes color.
  */
 
-// TODO(M1): TierTransition({ event }: { event: TierChangeEvent })
-//
-//   Content:
-//     - "Penny → Dwight" with both tier badges
-//     - The escalation reason, phrased as a capability gap
-//     - packet_summary: "Carrying over: account #48812, Okta IdP, cert issues
-//       ruled out"
-//
-//   ⚠ packet_summary is the payoff of the whole handoff protocol. Showing the
-//     customer exactly what was carried forward is what distinguishes this from
-//     a phone tree that makes you repeat yourself. Make it prominent, not a
-//     footnote.
-//
-// TODO(M1): Framer Motion — divider scales in horizontally, content fades up,
-//   ~400ms. Coordinated with useEscalation's sequence.
-//
-// TODO(M1): prefers-reduced-motion — render statically. The divider and its
-//   content must survive; only the motion is optional.
+import { motion } from 'framer-motion';
 
-export function TierTransition(): JSX.Element {
-  throw new Error('not implemented');
+import { getTheme, TIER_LABELS } from '@/themes';
+import type { TierChangeEvent } from '@/types';
+
+export function TierTransition({ event }: { event: TierChangeEvent }): JSX.Element {
+  const toTheme = getTheme(event.theme);
+
+  return (
+    <motion.div
+      className="my-4 flex flex-col items-center gap-2 px-4 text-center"
+      initial={{ opacity: 0, scaleX: 0.7 }}
+      animate={{ opacity: 1, scaleX: 1 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+    >
+      <div className="flex w-full items-center gap-3">
+        <span className="h-px flex-1" style={{ backgroundColor: toTheme.accent, opacity: 0.4 }} />
+        <span
+          className="whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium"
+          style={{ borderColor: toTheme.accent, color: toTheme.accent }}
+        >
+          {event.from_persona} ({TIER_LABELS[event.from_tier]}) → {event.to_persona} (
+          {TIER_LABELS[event.to_tier]})
+        </span>
+        <span className="h-px flex-1" style={{ backgroundColor: toTheme.accent, opacity: 0.4 }} />
+      </div>
+
+      <motion.p
+        className="theme-muted max-w-md text-xs italic"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.15 }}
+      >
+        {event.reason}
+      </motion.p>
+
+      {/* packet_summary is the payoff of the whole handoff protocol — showing
+          exactly what carried forward is what distinguishes this from a phone
+          tree that makes the customer repeat themselves, so it gets top billing
+          rather than a footnote. */}
+      <motion.p
+        className="theme-surface max-w-md rounded-lg border px-3 py-2 text-sm font-medium"
+        style={{ borderColor: toTheme.accent }}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.25 }}
+      >
+        {event.packet_summary}
+      </motion.p>
+    </motion.div>
+  );
 }

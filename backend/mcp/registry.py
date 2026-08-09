@@ -19,7 +19,7 @@ from backend.config.schema import Tier
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from backend.config.schema import CompanyConfig, MCPServerConfig
+    from backend.config.schema import CompanyConfig
 
 
 class MCPRegistry:

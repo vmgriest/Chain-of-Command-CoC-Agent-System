@@ -390,16 +390,23 @@ cd frontend && npm install && npm run dev  # frontend :5173
 
 ## Roadmap
 
-- [ ] LangGraph tier subgraphs + supervisor routing
-- [ ] Handoff packet schema and summarizer
-- [ ] HITL interrupt middleware with checkpoint/resume
+- [x] LangGraph tier subgraphs + supervisor routing
+- [x] Handoff packet schema and summarizer
+- [x] HITL interrupt middleware with checkpoint/resume
 - [ ] Internal MCP server
 - [ ] External MCP loader with binary allowlist + Docker sandboxing
 - [ ] Qdrant ingestion (PDF, Markdown, web crawl)
-- [ ] React frontend with per-tier theming and escalation transitions
+- [x] React frontend with per-tier theming and escalation transitions
 - [ ] CEO evaluator–optimizer loop
 - [ ] Email / push / call-scheduling integrations
 - [ ] Tracing across tier boundaries
 - [ ] Input and output guardrails
 - [ ] `company_config.json` schema validation and hot reload
 - [ ] Escalation-rate and resolution-per-tier analytics
+
+M0 and M1 (the vertical slice — see [PLAN.md](PLAN.md)) are built: all four
+tiers reachable, real handoff packets, real HITL consent/context interrupts,
+real per-tier UI theming. Tools above the Front Desk are still stubs pending
+M2 (RAG), M3 (MCP), and M4 (evaluator-optimizer, human notifications). See
+[CHECKLIST.md](CHECKLIST.md) for exact status per item, including what's
+live-verified vs. implemented-but-not-yet-demoed.

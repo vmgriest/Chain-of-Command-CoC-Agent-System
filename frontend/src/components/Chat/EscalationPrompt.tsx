@@ -9,24 +9,53 @@
  * manager is never asked to confirm.
  */
 
-// TODO(M1): EscalationPrompt({ event }: { event: EscalationPromptEvent })
-//
-//   Renders:
-//     - The agent's question, phrased around the capability gap:
-//       "I don't have access to your billing records from this desk. Would you
-//        like me to bring in a department manager who does?"
-//     - Who they would be handed to (to_persona, to_title) — the customer should
-//       know where they are going before agreeing
-//     - Two buttons: "Yes, escalate" / "No, keep trying"
-//
-// TODO(M1): on answer, send { type: 'escalation_response', approved } and clear
-//   the pending state immediately. The graph resumes from its interrupt.
-//
-// TODO(M1): refusal is a first-class outcome, not a dead end — the agent keeps
-//   working at the current tier. Style "No" as an equal option, not a cancel.
-//
-// TODO(M1): keyboard accessible; focus the primary button on mount.
+import { useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 
-export function EscalationPrompt(): JSX.Element {
-  throw new Error('not implemented');
+import type { EscalationPromptEvent } from '@/types';
+
+interface EscalationPromptProps {
+  event: EscalationPromptEvent;
+  onRespond: (approved: boolean) => void;
+}
+
+export function EscalationPrompt({ event, onRespond }: EscalationPromptProps): JSX.Element {
+  const yesRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    yesRef.current?.focus();
+  }, []);
+
+  return (
+    <motion.div
+      role="group"
+      aria-label="Escalation request"
+      className="theme-surface mx-4 my-2 rounded-xl border p-4"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+    >
+      <p className="text-sm">{event.question}</p>
+      <p className="theme-muted mt-1 text-xs">
+        You'd be transferred to {event.to_persona}, {event.to_title}.
+      </p>
+      <div className="mt-3 flex gap-2">
+        <button
+          ref={yesRef}
+          type="button"
+          onClick={() => onRespond(true)}
+          className="theme-accent rounded-lg border px-3 py-1.5 text-sm font-medium hover:opacity-80"
+        >
+          Yes, bring them in
+        </button>
+        <button
+          type="button"
+          onClick={() => onRespond(false)}
+          className="rounded-lg border px-3 py-1.5 text-sm font-medium opacity-80 hover:opacity-100"
+        >
+          No, keep trying here
+        </button>
+      </div>
+    </motion.div>
+  );
 }

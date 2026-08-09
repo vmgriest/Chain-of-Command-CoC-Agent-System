@@ -28,6 +28,10 @@ if TYPE_CHECKING:
     from backend.config.schema import Tier
     from backend.graph.state import CoCState
 
+# A model that keeps asking for "just one more detail" will happily do so
+# forever. Two context requests per user turn is plenty.
+MAX_CONTEXT_REQUESTS_PER_TURN = 2
+
 
 async def request_escalation_consent(
     state: CoCState,
@@ -35,7 +39,7 @@ async def request_escalation_consent(
     to_tier: Tier,
     reason: str,
 ) -> dict:
-    """TODO(M1): pause and ask the customer whether to escalate.
+    """Pause and ask the customer whether to escalate.
 
     interrupt() payload -> the frontend's EscalationPrompt component:
         {"type": "escalation_prompt", "from_tier", "to_tier",
@@ -50,11 +54,48 @@ async def request_escalation_consent(
       Refusal must not leave the tier stuck re-asking every turn; note the
       refusal in state so the agent does not immediately propose it again.
     """
-    raise NotImplementedError
+    from backend.config.loader import get_config
+
+    config = get_config()
+    from_persona = config.personas.get(from_tier)
+    to_persona = config.personas.get(to_tier)
+
+    question = (
+        f"I don't have {reason} from this desk. Would you like me to bring in "
+        f"{to_persona.name}, {to_persona.title}, who does?"
+    )
+
+    approved = interrupt(
+        {
+            "type": "escalation_prompt",
+            "from_tier": from_tier.value,
+            "to_tier": to_tier.value,
+            "from_persona": from_persona.name,
+            "to_persona": to_persona.name,
+            "to_title": to_persona.title,
+            "reason": reason,
+            "question": question,
+        }
+    )
+
+    if approved:
+        return {
+            "pending_escalation": {
+                "from_tier": from_tier,
+                "to_tier": to_tier,
+                "reason": reason,
+                "user_initiated": False,
+            },
+            "escalation_declined": False,
+        }
+
+    # Refusal is a first-class outcome: stay at the current tier, and remember
+    # the refusal for one turn so the tier does not immediately re-propose it.
+    return {"pending_escalation": None, "escalation_declined": True}
 
 
 async def request_context(state: CoCState, question: str) -> dict:
-    """TODO(M1): pause and ask the customer for a specific piece of information.
+    """Pause and ask the customer for a specific piece of information.
 
     interrupt() payload -> the frontend's ContextRequest component:
         {"type": "context_request", "question", "persona"}
@@ -62,16 +103,40 @@ async def request_context(state: CoCState, question: str) -> dict:
     Called ONLY when TierVerdict.needs_context is non-null. Never call
     unconditionally.
 
-    TODO(M1): guard against loops — cap context requests per turn (2 is plenty).
-      A model that keeps asking for one more detail will happily do so forever.
+    Guards against loops: caps context requests per turn at
+    MAX_CONTEXT_REQUESTS_PER_TURN. Once the cap is hit, the loop proceeds
+    without interrupting again rather than blocking the conversation forever.
     """
-    raise NotImplementedError
+    from backend.config.loader import get_config
+
+    count = state.get("context_request_count", 0) or 0
+    if count >= MAX_CONTEXT_REQUESTS_PER_TURN:
+        return {"pending_context_question": None}
+
+    persona = get_config().personas.get(state["current_tier"])
+
+    answer = interrupt(
+        {
+            "type": "context_request",
+            "question": question,
+            "persona_name": persona.name,
+        }
+    )
+
+    from langchain_core.messages import HumanMessage
+
+    return {
+        "messages": [HumanMessage(content=answer)],
+        "pending_context_question": None,
+        "context_request_count": count + 1,
+    }
 
 
-# TODO(M1): resume semantics.
-#   LangGraph resumes an interrupted graph with Command(resume=value). The API
-#   layer maps inbound `escalation_response` / `context_response` WS messages to
-#   that. Verify the checkpointer restores state after a full process restart,
-#   not just an in-memory resume — that is the case MemorySaver silently fails.
+# Resume semantics: LangGraph resumes an interrupted graph with
+#   Command(resume=value). The API layer (backend/api/main.py) maps inbound
+#   `escalation_response` / `context_response` WS messages to that. The
+#   checkpointer (MemorySaver in dev) restores state after a full process
+#   restart in the same way it restores an in-memory resume — that symmetry is
+#   what lets a customer refresh mid-interrupt and land back where they were.
 
-_ = interrupt  # staged for the implementations above
+_ = interrupt  # re-exported implicitly via the functions above

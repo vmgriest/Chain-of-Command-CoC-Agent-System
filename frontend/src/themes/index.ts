@@ -25,40 +25,73 @@ export interface Theme {
   avatarClass: string;
 }
 
-// TODO(M1): fill in real values. Placeholders below are structural only.
-//   Check contrast — `muted` on `bg` is the pairing that usually fails WCAG AA,
-//   and it is where timestamps and the tier badge live.
+// Contrast checked for `muted` on `bg` (the timestamps / tier-badge pairing) —
+// each stays at or above WCAG AA (4.5:1) for normal text.
 export const THEMES: Record<string, Theme> = {
+  // Front Desk — neutral, unremarkable. You wouldn't look twice.
   slate: {
-    bg: '', surface: '', accent: '', text: '', muted: '', avatarClass: '',
+    bg: '#f8fafc',
+    surface: '#ffffff',
+    accent: '#475569',
+    text: '#0f172a',
+    muted: '#475569',
+    avatarClass: 'bg-slate-200 text-slate-700',
   },
+  // Department Manager — warmer, a little more considered.
   amber: {
-    bg: '', surface: '', accent: '', text: '', muted: '', avatarClass: '',
+    bg: '#fffbeb',
+    surface: '#ffffff',
+    accent: '#b45309',
+    text: '#1c1917',
+    muted: '#92400e',
+    avatarClass: 'bg-amber-200 text-amber-900',
   },
+  // Vice President — more saturated, more formal.
   indigo: {
-    bg: '', surface: '', accent: '', text: '', muted: '', avatarClass: '',
+    bg: '#eef2ff',
+    surface: '#ffffff',
+    accent: '#4338ca',
+    text: '#1e1b4b',
+    muted: '#4338ca',
+    avatarClass: 'bg-indigo-200 text-indigo-900',
   },
+  // Office of the CEO — the whole palette inverts. You've arrived somewhere
+  // you were not expecting to end up.
   obsidian: {
-    bg: '', surface: '', accent: '', text: '', muted: '', avatarClass: '',
+    bg: '#0a0a0f',
+    surface: '#16161f',
+    accent: '#d4af37',
+    text: '#f4f4f5',
+    muted: '#a1a1aa',
+    avatarClass: 'bg-[#d4af37]/20 text-[#d4af37]',
   },
 };
 
 export const FALLBACK_THEME = 'slate';
 
-/** TODO(M1): return THEMES[name] ?? THEMES[FALLBACK_THEME].
- *  An unknown theme name from config must degrade, not crash the chat. */
-export function getTheme(_name: string): Theme {
-  throw new Error('not implemented');
+/** Returns THEMES[name] ?? THEMES[FALLBACK_THEME]. An unknown theme name from
+ *  config degrades to the fallback rather than crashing the chat. */
+export function getTheme(name: string): Theme {
+  return THEMES[name] ?? THEMES[FALLBACK_THEME];
 }
 
-/** TODO(M1): write the theme onto a root element as CSS custom properties
- *  (--tier-bg, --tier-surface, ...), matching tailwind.config.js. */
-export function applyTheme(_el: HTMLElement, _theme: Theme): void {
-  throw new Error('not implemented');
+/** Writes the theme onto a root element as CSS custom properties, matching
+ *  tailwind.config.js's `colors.tier.*`. */
+export function applyTheme(el: HTMLElement, theme: Theme): void {
+  el.style.setProperty('--tier-bg', theme.bg);
+  el.style.setProperty('--tier-surface', theme.surface);
+  el.style.setProperty('--tier-accent', theme.accent);
+  el.style.setProperty('--tier-text', theme.text);
+  el.style.setProperty('--tier-muted', theme.muted);
 }
 
-// TODO(M1): TIER_LABELS — display names for the tier badge
-//   ("Front Desk", "Department Manager", "Vice President", "Office of the CEO").
-//   Distinct from persona names, which come from config.
+/** Display names for the tier badge. Distinct from persona names, which come
+ *  from config — the badge is the rung, the name is the person. */
+export const TIER_LABELS: Record<Tier, string> = {
+  front_desk: 'Front Desk',
+  manager: 'Department Manager',
+  vice_president: 'Vice President',
+  ceo: 'Office of the CEO',
+};
 
 export type { Tier };

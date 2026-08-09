@@ -4,20 +4,48 @@
 
 import type { PublicConfig } from '@/types';
 
-// TODO(M1): API_BASE from import.meta.env.VITE_API_BASE, defaulting to '' so the
-//   Vite dev proxy handles it (see vite.config.ts).
+const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
-/** TODO(M1): GET /api/config — personas and themes, fetched once at app mount. */
+/** GET /api/config — personas and themes, fetched once at app mount. */
 export async function fetchConfig(): Promise<PublicConfig> {
-  throw new Error('not implemented');
+  const res = await fetch(`${API_BASE}/api/config`);
+  if (!res.ok) {
+    throw new Error(`GET /api/config failed: ${res.status}`);
+  }
+  return (await res.json()) as PublicConfig;
 }
 
-/** TODO(M1): GET /api/health — backend, Ollama, Qdrant, MCP server liveness. */
+/** GET /api/health — backend, Ollama, Qdrant, MCP server liveness. */
 export async function fetchHealth(): Promise<Record<string, boolean>> {
-  throw new Error('not implemented');
+  const res = await fetch(`${API_BASE}/api/health`);
+  if (!res.ok) {
+    throw new Error(`GET /api/health failed: ${res.status}`);
+  }
+  return (await res.json()) as Record<string, boolean>;
 }
 
-// TODO(M1): wsUrl(sessionId) — build ws:// or wss:// from window.location so it
-//   works in dev and behind TLS in production without a second config knob.
+/** Builds ws:// or wss:// from window.location so it works in dev and behind
+ *  TLS in production without a second config knob. */
+export function wsUrl(sessionId: string): string {
+  if (!API_BASE) {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProtocol}//${window.location.host}/ws/chat/${sessionId}`;
+  }
+  const httpUrl = new URL(API_BASE, window.location.origin);
+  const wsProtocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProtocol}//${httpUrl.host}/ws/chat/${sessionId}`;
+}
 
-// TODO(M1): newSessionId() — crypto.randomUUID(), persisted to localStorage.
+const SESSION_STORAGE_KEY = 'coc_session_id';
+
+/** crypto.randomUUID(), persisted to localStorage so a refresh reconnects to
+ *  the same conversation rather than silently starting a new one. */
+export function newSessionId(): string {
+  const existing = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (existing) {
+    return existing;
+  }
+  const id = crypto.randomUUID();
+  localStorage.setItem(SESSION_STORAGE_KEY, id);
+  return id;
+}

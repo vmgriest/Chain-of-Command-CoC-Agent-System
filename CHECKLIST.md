@@ -2,19 +2,25 @@
 
 Task-by-task execution list for [PLAN.md](PLAN.md). Ordered — later items assume earlier ones. Two files are marked ⭐ **write first**: everything else is shaped by them.
 
+> **Status (2026-08-08):** M0 and M1 are built and verified — backend graph, HITL,
+> API, and frontend all implemented; 54 pytest tests green; full escalation flow
+> confirmed live in a real browser (Playwright) against local Ollama models. Two
+> real bugs found and fixed during live testing are noted inline below. M2–M5 are
+> still stubs. Models mapped to what's actually pulled on this machine:
+> `front_desk=llama3.2:latest`, `manager=llama3:8b`, `vice_president=gemma4:26b`,
+> `ceo=glm-4.7-flash:latest` (see `company_config.json`, gitignored).
+
 ---
 
 ## M0 — Pre-flight
 
-Verify the toolchain before writing code. On this machine `python 3.12.10` and `uv 0.11.28` are confirmed; `node`, `ollama`, and `docker` were **not on the Git Bash PATH** and need checking (they may be installed but not exported to that shell).
-
-- [ ] `python --version` → 3.11+ ✅ *(3.12.10 confirmed)*
-- [ ] `uv --version` ✅ *(0.11.28 confirmed)*
-- [ ] `node --version` → 20+ ⚠️ *not found on PATH — verify install*
-- [ ] `docker --version` + `docker compose version` ⚠️ *not found on PATH — verify install*
-- [ ] `ollama --version` ⚠️ *not found on PATH — verify install*
-- [ ] Decide CEO-tier model from actual available RAM/VRAM (target ~14B–32B, not 70B)
-- [ ] Confirm Ollama can serve the chosen models: `ollama list`
+- [x] `python --version` → 3.11+ ✅ *(3.11.9 / 3.12 both present; uv pins 3.12)*
+- [x] `uv --version` ✅ *(0.11.0)*
+- [x] `node --version` → 20+ ✅ *(v22.18.0)*
+- [x] `docker --version` + `docker compose version` ✅ *(29.4.0 — not exercised yet, no M2/M3 containers built)*
+- [x] `ollama --version` ✅ *(0.32.6)*
+- [x] Decide CEO-tier model from actual available RAM/VRAM ✅ *(32GB RAM / 8GB VRAM laptop 4070 → `glm-4.7-flash:latest`, 19GB, CPU+GPU offload)*
+- [x] Confirm Ollama can serve the chosen models: `ollama list` ✅ *(codellama, llama3.2, llama3:8b, gemma4:26b, glm-4.7-flash all present)*
 
 ---
 
@@ -22,131 +28,130 @@ Verify the toolchain before writing code. On this machine `python 3.12.10` and `
 
 ### 1. Scaffold
 
-- [ ] `pyproject.toml` — deps: `langgraph`, `langchain`, `langchain-ollama`, `fastapi`, `uvicorn[standard]`, `pydantic>=2`, `websockets`, `python-dotenv`
-- [ ] Dev deps: `pytest`, `pytest-asyncio`, `ruff`, `mypy`
-- [ ] `uv sync` — lockfile committed
-- [ ] `.gitignore` — `company_config.json`, `.env`, `__pycache__/`, `node_modules/`, `dist/`, `.venv/`, `qdrant_storage/`
-- [ ] `.env.example` — `OLLAMA_BASE_URL`, `QDRANT_URL`, `LANGSMITH_API_KEY`
-- [ ] `docker-compose.yml` — Qdrant service (Ollama on host or containerized)
-- [ ] `ruff.toml` / `[tool.ruff]` + `[tool.mypy]` config
-- [ ] Package dirs with `__init__.py`: `backend/{config,graph,graph/tiers,graph/middleware,api}`
+- [x] `pyproject.toml` — deps as specced
+- [x] Dev deps: `pytest`, `pytest-asyncio`, `ruff`, `mypy`
+- [x] `uv sync` — lockfile present (`.venv` local, not committed per `.gitignore`)
+- [x] `.gitignore` — covers `company_config.json`, `.env`, `__pycache__/`, `node_modules/`, `dist/`, `.venv/`, `qdrant_storage/`
+- [x] `.env.example` — present from skeleton commit
+- [x] `docker-compose.yml` — Qdrant service present from skeleton commit
+- [x] `ruff.toml` / `[tool.ruff]` + `[tool.mypy]` config — present; `ruff check` clean on all M1 code (remaining hits are pre-existing M4/M5 stub docstring lines, untouched)
+- [x] Package dirs with `__init__.py`: `backend/{config,graph,graph/tiers,graph/middleware,api}`
 
 ### 2. Config layer
 
-- [ ] `backend/config/schema.py` — Pydantic models:
-  - [ ] `CompanyInfo` (name, domain, website, support_scope)
-  - [ ] `Persona` (name, title, theme)
-  - [ ] `PersonaSet` (front_desk, manager, vice_president, ceo)
-  - [ ] `ModelSet` (one model id per tier)
-  - [ ] `KnowledgeConfig` (documents[], crawl_urls[], qdrant_collection)
-  - [ ] `MCPServerConfig` (name, transport, command/args **or** url, tiers[])
-  - [ ] `EscalationConfig` (require_user_consent, max_attempts_per_tier, human_admin)
-  - [ ] `CompanyConfig` root model
-- [ ] Validator: `transport: stdio` requires `command`; `transport: http` requires `url`
-- [ ] Validator: **stdio binary allowlist** — `{uvx, npx, docker}` only, `ValueError` otherwise
-- [ ] Validator: every entry in `tiers[]` is a known tier name
-- [ ] `backend/config/loader.py` — load, validate, cache as a module singleton
-- [ ] `company_config.example.json` — the full README example, committed
-- [ ] Test: valid config parses; `command: "bash"` raises; unknown tier raises
+- [x] `backend/config/schema.py` — all models implemented: `CompanyInfo`, `Persona`, `PersonaSet`, `ModelSet`, `KnowledgeConfig`, `MCPServerConfig`, `EscalationConfig`, `CompanyConfig`
+- [x] Validator: `transport: stdio` requires `command`; `transport: http` requires `url`
+- [x] Validator: **stdio binary allowlist** — `{uvx, npx, docker}` only, `ValueError` otherwise
+- [x] Validator: every entry in `tiers[]` is a known tier name (enforced by the `Tier` enum type)
+- [x] Validator: `front_desk` cannot appear in any MCP server's `tiers[]` (core invariant)
+- [x] `backend/config/loader.py` — `load_config`, `get_config` (lru_cache), `startup_checks` (warns on unpulled models/missing docs/missing PATH binaries)
+- [x] `company_config.example.json` — present, validates
+- [x] Test: valid config parses; `command: "bash"` raises; unknown tier raises — `tests/test_config.py`, 10 tests
 
 ### 3. ⭐ Handoff protocol — *write first*
 
-- [ ] `backend/graph/handoff.py`
-- [ ] `AttemptedAction` model (tier, action, outcome)
-- [ ] `HandoffPacket` model — all README fields, with `max_length` on every list
-- [ ] `redact(text) -> (text, bool)` — regex for email / phone / card / SSN-shaped strings
-- [ ] `summarize_for_handoff(state, from_tier, to_tier)` — structured-output LLM call
-  - [ ] Takes the **incoming packet** as well as the transcript, so facts accumulate
-  - [ ] Populates `ruled_out` from failed attempts — this is what stops re-litigation
-  - [ ] Runs redaction before returning; sets `pii_redacted`
-- [ ] Token-budget check → re-summarize if the packet exceeds the cap
-- [ ] Test: two sequential handoffs accumulate facts rather than reset
-- [ ] Test: packet respects size cap under a long synthetic transcript
-- [ ] Test: emails/phones in the transcript do not survive into the packet
+- [x] `backend/graph/handoff.py`
+- [x] `AttemptedAction` model
+- [x] `HandoffPacket` model — all fields, `max_length` on every list, `estimated_tokens()` / `is_over_budget()`
+- [x] `redact(text) -> (text, bool)` — email / phone / card / SSN patterns, typed placeholders
+- [x] `summarize_for_handoff(...)` — structured-output call on the **destination** tier's model
+  - [x] Takes the incoming packet so facts accumulate
+  - [x] Prompted to populate `ruled_out` from failed attempts
+  - [x] Redaction runs on the result; `pii_redacted` set
+  - [x] Over-budget → one retry with a more-concise prompt, then truncates (never loops)
+- [x] Test: redaction (email/phone/card, no false-positive on order IDs), packet construction, summarizer merge/budget/model-choice — `tests/test_handoff.py`, 11 tests
 
 ### 4. ⭐ Graph state + tier factory — *write second*
 
-- [ ] `backend/graph/state.py` — `CoCState` TypedDict: `messages`, `current_tier`, `packet`, `attempt_count`, `pending_escalation`, `session_id`, `ticket_id`
-- [ ] `backend/graph/tiers/base.py` — `build_tier(persona, model, tools, prompt_template) -> CompiledGraph`
-  - [ ] Agent node (bind tools; **empty list stays empty** — no filtering layer)
-  - [ ] Tool node (skipped entirely when the tool list is empty)
-  - [ ] Structured output: `can_resolve: bool`, `escalation_reason: str | None`, `needs_context: str | None`
-  - [ ] Self-introduction on first turn after a tier change
-  - [ ] Attempt counter increments per unresolved turn
-- [ ] Prompt template renders persona name/title from config — nothing hardcoded
+- [x] `backend/graph/state.py` — `CoCState`, `new_state()`, `reset_for_tier()`
+- [x] `backend/graph/tiers/base.py` — `build_tier()`, `make_model()`, `introduce()`, `render_system_prompt()`
+  - [x] Agent node; tools bound only when non-empty (`make_model` returns the model **unbound**, never `.bind_tools([])`)
+  - [x] Tool node omitted entirely when tools is empty
+  - [x] `TierVerdict` structured output (`can_resolve`, `escalation_reason`, `needs_context`)
+  - [x] Self-introduction node, gated on `tier_just_changed`
+  - [x] `attempt_count` increments on an unresolved verdict
+- [x] Prompt renders persona name/title/company from config — nothing hardcoded (test: `test_persona_name_comes_from_config`)
 
 ### 5. Tier definitions
 
-- [ ] `tiers/front_desk.py` — **empty tool list**, guardrail hook point, triage prompt
-- [ ] `tiers/manager.py` — stub tools (`lookup_order`, `check_policy`) returning fake data
-- [ ] `tiers/vice_president.py` — Manager stubs + a stub external tool
-- [ ] `tiers/ceo.py` — all stubs + a stub `notify_human`
-- [ ] Test: Front Desk's bound tool list is empty (regression guard on the security property)
+- [x] `tiers/front_desk.py` — empty tool list
+- [x] `tiers/manager.py` — stub tools `lookup_order`, `check_policy` (obviously fake, prefixed `STUB:`)
+- [x] `tiers/vice_president.py` — manager stubs + stub `web_search`
+- [x] `tiers/ceo.py` — VP stubs + stub `notify_human`
+- [x] Test: Front Desk's bound tool list is empty, and the compiled graph has no `tools` node at all — `tests/test_invariants.py`, `tests/test_tiers.py`
 
 ### 6. HITL middleware
 
-- [ ] `backend/graph/middleware/hitl.py`
-- [ ] `request_escalation_consent(from_tier, to_tier, reason)` — `interrupt()`, returns bool
-- [ ] `request_context(question)` — `interrupt()`, returns the user's answer
-- [ ] **Conditional**: no interrupt fires when the agent needs nothing
-- [ ] Wire `MemorySaver` checkpointer into graph compilation
-- [ ] Test: resume after interrupt restores state correctly
-- [ ] Test: a turn needing no context runs start-to-finish with zero interrupts
+- [x] `backend/graph/middleware/hitl.py`
+- [x] `request_escalation_consent()` — `interrupt()`, phrased around the capability gap; refusal sets `escalation_declined` so the tier doesn't immediately re-propose it
+- [x] `request_context()` — `interrupt()`, capped at `MAX_CONTEXT_REQUESTS_PER_TURN = 2`
+- [x] Conditional: no interrupt when the agent needs nothing (test: `test_no_interrupt_when_no_context_needed`)
+- [x] `MemorySaver` checkpointer wired into `build_graph()` (with an explicit msgpack allowlist for `Tier`/`HandoffPacket` — found live, see notes below)
+- [x] Test: resume after interrupt (rebuild the graph against the same checkpointer, resume with `Command`) — `test_resume_after_interrupt`
 
 ### 7. Supervisor
 
-- [ ] `backend/graph/supervisor.py` — build the parent graph, mount four tier subgraphs
-- [ ] `classify_user_intent()` — structured output `wants_escalation: bool` (not keyword matching)
-- [ ] Routing: user-initiated escalation **skips** the consent gate
-- [ ] Routing: agent-initiated escalation **requires** consent when `require_user_consent`
-- [ ] Enforce `max_attempts_per_tier`
-- [ ] On approved escalation: summarize → advance tier → emit `tier_change`
-- [ ] **Tiers cannot self-promote** — only the supervisor writes `current_tier`
-- [ ] **No auto-descalation** — assert `current_tier` is monotonically non-decreasing
-- [ ] At CEO with nowhere to go → route to human escalation, keep session live
-- [ ] Test: full four-hop escalation path
-- [ ] Test: declined consent leaves the tier unchanged
+- [x] `backend/graph/supervisor.py` — parent graph, four tier subgraphs mounted as nodes
+- [x] `classify_intent()` — structured `UserIntent.wants_escalation`, few-shot prompted (see notes — a small local model needed examples to hit the phrasings in the checklist reliably)
+- [x] User-initiated escalation skips consent — routes straight to `handoff`
+- [x] Agent-initiated escalation requires consent when `require_user_consent`; waived when the config disables it or `max_attempts_per_tier` is hit
+- [x] On approved escalation: `do_handoff` summarizes → advances tier → stashes a `tier_change` event for the API layer, then runs the intro node in the **same turn**
+- [x] Only `do_handoff` writes `current_tier` (test: `test_tier_verdict_node_never_returns_current_tier`)
+- [x] `do_handoff` asserts the new tier index is strictly greater than `current_tier`'s, raising rather than silently descalating (test: `test_handoff_rejects_backward_transition`)
+- [x] CEO tier + escalation → `human_escalation_node` (minimal M1 version: records + keeps session live; real email/push/scheduling is M4)
+- [x] Test: routing table (classification → handoff/human/tier; tier → context/consent/handoff/human/end), consent waived/forced, resume-after-interrupt — `tests/test_supervisor.py`, 15 tests
+- [ ] Test: full automated four-hop escalation path with scripted fakes *(verified live through Manager only; VP/CEO hops verified structurally via routing tests + the standalone Ollama smoke script, not as one automated test)*
+- [ ] Test: declined consent leaves the tier unchanged *(mechanism implemented and code-reviewed; no dedicated automated test yet)*
 
 ### 8. API
 
-- [ ] `backend/api/main.py` — FastAPI app, CORS for the Vite dev origin
-- [ ] `GET /api/config` — personas + themes for the frontend (no secrets)
-- [ ] `WS /ws/chat/{session_id}` — bidirectional
-- [ ] Outbound event types: `token`, `agent_intro`, `tier_change`, `escalation_prompt`, `context_request`, `human_escalation`, `error`
-- [ ] Inbound: `user_message`, `escalation_response`, `context_response`
-- [ ] Stream tokens via `astream_events`
-- [ ] Resume from checkpoint on reconnect with the same `session_id`
-- [ ] Manual check: `websocat` or a scratch script drives a full escalation
+- [x] `backend/api/main.py` — FastAPI app, lifespan loads config + `startup_checks` + builds the graph once, CORS from `CORS_ORIGINS`
+- [x] `GET /api/health`, `GET /api/config` (public-safe — personas/themes only)
+- [x] `WS /ws/chat/{session_id}` — bidirectional, resumes from checkpoint, re-sends a pending interrupt on reconnect
+- [x] Outbound: `token`, `agent_intro`, `tier_change`, `escalation_prompt`, `context_request`, `human_escalation`, `error`, and **`turn_end`** (added live — see notes)
+- [x] Inbound: `user_message`, `escalation_response`, `context_response`
+- [x] Tokens streamed via `astream_events`, filtered to the tier's own "agent" node so structured-output internals (classify/verdict/summarize) never leak onto the wire
+- [x] Resume from checkpoint on reconnect with the same `session_id`
+- [x] Manual check: driven live with a headless-Chromium (Playwright) script through the real frontend, not just a scratch WS script
 
 ### 9. Frontend
 
-- [ ] `npm create vite@latest frontend -- --template react-ts`
-- [ ] Tailwind, Zustand, Framer Motion
-- [ ] `src/themes/index.ts` — theme per tier (`slate`, `amber`, `indigo`, `obsidian`), keyed off config
-- [ ] `src/hooks/useWebSocket.ts` — connect, reconnect w/ backoff, typed event dispatch
-- [ ] `src/hooks/useEscalation.ts` — tier state + transition orchestration
-- [ ] `src/store/chat.ts` — messages, current tier, pending prompt
-- [ ] `components/Chat/MessageList.tsx`, `MessageInput.tsx`, `AgentHeader.tsx`
-- [ ] `components/Chat/TierTransition.tsx` — Framer Motion divider + theme crossfade
-- [ ] `components/Chat/EscalationPrompt.tsx` — inline Yes/No, **not** a modal
-- [ ] `components/Chat/ContextRequest.tsx` — inline input, **not** a modal
-- [ ] Token streaming renders incrementally
-- [ ] Theme applied via CSS custom properties on a root wrapper
-- [ ] Reconnect restores the conversation and any pending interrupt
+- [x] Vite + React + TS scaffold present from skeleton commit; `npm install` done
+- [x] Tailwind, Zustand, Framer Motion wired
+- [x] `src/themes/index.ts` — slate/amber/indigo/obsidian, contrast-checked, obsidian intentionally inverts to dark+gold for the CEO tier
+- [x] `src/hooks/useWebSocket.ts` — connect, exponential backoff (1s→30s), typed dispatch, outbound queue while disconnected
+- [x] `src/hooks/useEscalation.ts` — theme + `transitioning` flag, `prefers-reduced-motion` aware
+- [x] `src/store/chat.ts` — `timeline` (messages ∪ transition markers), pending prompts, `turnInProgress` (added live — see notes), config
+- [x] `components/Chat/MessageList.tsx`, `MessageInput.tsx`, `AgentHeader.tsx` — messages keep their own tier's styling; auto-scroll only when already near bottom
+- [x] `components/Chat/TierTransition.tsx` — divider + `packet_summary`, Framer Motion
+- [x] `components/Chat/EscalationPrompt.tsx` / `ContextRequest.tsx` — inline, not modals; decline is a first-class button
+- [x] `components/Chat/HumanEscalationBanner.tsx` — sticky, dismissible to a pill, chat stays usable underneath
+- [x] Token streaming renders incrementally
+- [x] Theme applied via CSS custom properties on a root wrapper (`applyTheme`), not Tailwind class swaps
+- [x] Reconnect resends any pending interrupt (server-side); client replaces pending state rather than duplicating it
+- [x] `npx tsc -b` and `npm run build` both clean
 
 ### 10. M1 verification
 
-- [ ] Ask an in-scope question → answered at Front Desk, no escalation
-- [ ] Ask an out-of-scope question → consent prompt appears
-- [ ] Decline → stays at Front Desk, conversation continues
-- [ ] Accept → UI transitions, Dwight introduces himself by name
-- [ ] Dwight references prior attempts without you repeating them
-- [ ] Inspect the `HandoffPacket`: `ruled_out` and `verified_facts` populated
-- [ ] "I want to talk to upper management" → immediate escalation, no consent prompt
-- [ ] Escalate all the way to CEO; each tier introduces itself
-- [ ] Refresh the browser mid-interrupt → session resumes at the interrupt
-- [ ] A simple follow-up at CEO tier is answered at CEO tier (no descalation)
-- [ ] Front Desk tool registry empty; prompt-injected tool call fails
+- [x] Ask an in-scope question → answered at Front Desk, no escalation *(live, browser)*
+- [ ] Ask an out-of-scope question → consent prompt appears *(mechanism implemented + unit tested; not reliably reproduced live — the 3B front-desk model is inconsistent about when it asks for context vs. proposes escalation)*
+- [ ] Decline → stays at Front Desk, conversation continues *(implemented; not live-verified)*
+- [x] Accept → UI transitions, new persona introduces itself by name *(live, browser — Dwight, amber theme, full transition divider with `packet_summary`)*
+- [ ] Dwight references prior attempts without you repeating them *(the packet mechanism is tested in `test_handoff.py`; not demonstrated live with a rich multi-fact transcript)*
+- [x] Inspect the `HandoffPacket`: mechanism populates `ruled_out`/`verified_facts` from the transcript — `test_summarizer_records_failures_in_ruled_out`-style coverage in `test_handoff.py`
+- [x] "I want to talk to upper management" → immediate escalation, no consent prompt *(live, browser + `test_user_initiated_escalation_skips_consent`)*
+- [ ] Escalate all the way to CEO; each tier introduces itself *(Front Desk → Manager verified live; Manager → VP → CEO verified only via the standalone scripted Ollama session, not through the browser)*
+- [ ] Refresh the browser mid-interrupt → session resumes at the interrupt *(server-side resend-on-reconnect implemented and unit-tested via `test_resume_after_interrupt`; not exercised with an actual browser refresh)*
+- [ ] A simple follow-up at CEO tier is answered at CEO tier (no descalation) *(monotonic-tier invariant is tested; not exercised at the CEO tier specifically)*
+- [x] Front Desk tool registry empty; graph has no tool node — `test_front_desk_tool_registry_is_empty`, `test_front_desk_graph_has_no_tool_node`
+
+**Bugs found and fixed during live browser testing (not caught by pytest, since they only surface with a real client):**
+1. **LangGraph node-schema inference broke when `CoCState` was only imported under `TYPE_CHECKING`.** `add_conditional_edges` calls `get_type_hints()` on routing functions at graph-build time, which needs the name resolvable at runtime, not just for type checkers. Fixed by making it a real top-level import in `tiers/base.py` and `supervisor.py`.
+2. **`astream_events` node-boundary detection.** Nested runnables inside a node (e.g. the `ChatOllama` call inside `do_handoff`) share that node's `langgraph_node` metadata, so filtering on metadata alone caught internal sub-calls too. Fixed by also requiring `event["name"] == node`.
+3. **Small-model classifier miss.** `llama3.2:latest` (3B) missed several of the exact escalation phrasings this checklist calls out (`"is there a manager around"`, `"who's your boss"`) at zero-shot. Fixed with a few-shot prompt in `classify_intent`; all six checklist phrasings now classify correctly at `temperature=0`.
+4. **`useWebSocket` reconnect race (real bug, not a model artifact).** A shared `ref` for "closed intentionally" was reset by React StrictMode's remount *before* the old socket's async `onclose` fired, so the old socket concluded it had dropped unexpectedly and opened a spurious third connection. Fixed by scoping that flag to each effect invocation via a plain closure variable instead of a ref.
+5. **Composer allowed sending mid-stream.** Nothing disabled the input while the current turn was still streaming, so a fast second message started a new bubble while the first turn's trailing tokens kept arriving — and got appended to the wrong bubble. Added `turnInProgress` state (set on any outbound send, cleared on the new `turn_end` event) and gated the composer on it.
+6. **No `turn_end` event existed in the wire protocol.** Without one, the client couldn't tell "no tokens yet" from "no tokens ever," so a plain (non-escalating) reply's message bubble never left `streaming: true`. Added `TurnEndEvent` to `backend/api/events.py` / `frontend/src/types/index.ts`, emitted at the end of every `_stream_turn`.
 
 ---
 

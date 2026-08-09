@@ -14,6 +14,7 @@ this file comes first.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import TYPE_CHECKING, Literal
 
@@ -42,25 +43,36 @@ MAX_PACKET_TOKENS = 800
 # ---------------------------------------------------------------------------
 
 # PII is stripped ONCE, at the tier boundary, on the way up — not at every tier.
-# TODO(M1): start with these four patterns. TODO(M5): upgrade to a real PII
-#   detector; regex will miss names, addresses, and anything non-US-shaped.
+# Start with these four patterns. TODO(M5): upgrade to a real PII detector;
+#   regex will miss names, addresses, and anything non-US-shaped.
+# Order matters: card (long digit runs) before phone (shorter digit runs) so a
+# 16-digit card number isn't partially eaten by the phone pattern first.
 PII_PATTERNS: dict[str, re.Pattern[str]] = {
-    # "email": re.compile(...),
-    # "phone": re.compile(...),
-    # "card":  re.compile(...),
-    # "ssn":   re.compile(...),
+    "email": re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}"),
+    "card": re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)"),
+    "phone": re.compile(
+        r"(?<!\d)(?:\+?1[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)"
+    ),
+    "ssn": re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"),
 }
 
 
 def redact(text: str) -> tuple[str, bool]:
-    """TODO(M1): replace PII matches with typed placeholders (e.g. "[EMAIL]").
+    """Replace PII matches with typed placeholders (e.g. "[EMAIL]").
 
     Returns (redacted_text, was_anything_redacted).
 
     Placeholders must be typed, not blanked — a downstream tier needs to know an
     email was present in order to ask for it again.
     """
-    raise NotImplementedError
+    redacted_any = False
+    result = text
+    for label, pattern in PII_PATTERNS.items():
+        new_result, count = pattern.subn(f"[{label.upper()}]", result)
+        if count:
+            redacted_any = True
+            result = new_result
+    return result, redacted_any
 
 
 # ---------------------------------------------------------------------------
@@ -129,21 +141,90 @@ class HandoffPacket(BaseModel):
 
     pii_redacted: bool = False
 
-    # TODO(M1): estimated_tokens() -> int
-    # TODO(M1): is_over_budget() -> bool  (compare against MAX_PACKET_TOKENS)
+    def estimated_tokens(self) -> int:
+        """Rough token estimate (~4 chars/token). Not exact, but must track
+        packet size monotonically as fields grow."""
+        text = self.customer_intent + self.escalation_reason
+        text += "".join(self.verified_facts)
+        text += "".join(f"{a.tier}{a.action}{a.outcome}" for a in self.attempted_actions)
+        text += "".join(self.ruled_out) + "".join(self.open_questions)
+        return max(1, len(text) // 4)
+
+    def is_over_budget(self) -> bool:
+        return self.estimated_tokens() > MAX_PACKET_TOKENS
 
 
 # ---------------------------------------------------------------------------
 # Summarization
 # ---------------------------------------------------------------------------
 
-# TODO(M1): SUMMARIZER_PROMPT
-#   Must instruct the model to:
-#     - MERGE with the incoming packet, never start fresh. Facts accumulate up
-#       the ladder; that accumulation is the entire point.
-#     - Prefer specifics over hedges ("account #48812" beats "an account").
-#     - Record failed attempts in ruled_out with the reason they failed.
-#     - Never invent facts not present in the transcript.
+SUMMARIZER_PROMPT = """\
+You are compiling a handoff packet as a customer support ticket moves from one \
+support tier to the next. Merge the transcript below with the packet already \
+carried forward — do NOT start fresh. Facts accumulate up the ladder; that \
+accumulation is the entire point of this protocol.
+
+Rules:
+- Prefer specifics over hedges ("account #48812" beats "an account").
+- Keep every fact and ruled-out item already present in the incoming packet \
+unless the transcript below directly contradicts it.
+- Record every failed attempt in ruled_out, with the reason it failed.
+- Never invent facts that are not present in the transcript or the incoming packet.
+- Keep every list within its size limit ({max_facts} facts, {max_actions} \
+attempted actions, {max_ruled_out} ruled out, {max_open} open questions) — keep \
+the most important entries if you must drop some.
+
+Incoming packet (already established — carry all of it forward unless superseded):
+{incoming}
+
+Transcript since the incoming packet was created:
+{transcript}
+
+The tier handing off is: {from_tier}
+The reason this tier could not resolve it: {escalation_reason}
+"""
+
+
+def _format_transcript(messages: list[BaseMessage]) -> str:
+    lines = []
+    for m in messages:
+        role = getattr(m, "type", "message")
+        content = getattr(m, "content", "")
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines) if lines else "(no messages)"
+
+
+def _redact_packet(packet: HandoffPacket) -> HandoffPacket:
+    """Run redact() over every free-text field. Returns a new packet."""
+    redacted_any = False
+
+    def _r(text: str) -> str:
+        nonlocal redacted_any
+        new_text, hit = redact(text)
+        redacted_any = redacted_any or hit
+        return new_text
+
+    packet.customer_intent = _r(packet.customer_intent)
+    packet.escalation_reason = _r(packet.escalation_reason)
+    packet.verified_facts = [_r(f) for f in packet.verified_facts]
+    packet.ruled_out = [_r(f) for f in packet.ruled_out]
+    packet.open_questions = [_r(f) for f in packet.open_questions]
+    packet.attempted_actions = [
+        AttemptedAction(tier=a.tier, action=_r(a.action), outcome=_r(a.outcome))
+        for a in packet.attempted_actions
+    ]
+    packet.pii_redacted = redacted_any
+    return packet
+
+
+def _truncate_packet(packet: HandoffPacket) -> HandoffPacket:
+    """Last resort when re-summarization is still over budget. Cuts to the caps
+    rather than looping further."""
+    packet.verified_facts = packet.verified_facts[:MAX_FACTS]
+    packet.attempted_actions = packet.attempted_actions[:MAX_ACTIONS]
+    packet.ruled_out = packet.ruled_out[:MAX_RULED_OUT]
+    packet.open_questions = packet.open_questions[:MAX_OPEN_QUESTIONS]
+    return packet
 
 
 async def summarize_for_handoff(
@@ -154,7 +235,7 @@ async def summarize_for_handoff(
     escalation_reason: str,
     ticket_id: str,
 ) -> HandoffPacket:
-    """TODO(M1): produce the packet the next tier will receive.
+    """Produce the packet the next tier will receive.
 
     Steps:
       1. Build the summarizer prompt from `messages` AND `incoming` — passing the
@@ -167,12 +248,67 @@ async def summarize_for_handoff(
     Which model summarizes? Use the DESTINATION tier's model: it is the larger of
     the two, and it is the one that has to act on the result.
     """
-    raise NotImplementedError
+    from langchain_ollama import ChatOllama
+
+    from backend.config.loader import get_config
+
+    config = get_config()
+    model_id = config.models.get(to_tier)
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    llm = ChatOllama(model=model_id, base_url=base_url, temperature=0)
+    structured_llm = llm.with_structured_output(HandoffPacket)
+
+    incoming_json = (
+        incoming.model_dump_json(indent=2) if incoming else "(none — this is the first hop)"
+    )
+    prompt = SUMMARIZER_PROMPT.format(
+        max_facts=MAX_FACTS,
+        max_actions=MAX_ACTIONS,
+        max_ruled_out=MAX_RULED_OUT,
+        max_open=MAX_OPEN_QUESTIONS,
+        incoming=incoming_json,
+        transcript=_format_transcript(messages),
+        from_tier=from_tier.value,
+        escalation_reason=escalation_reason,
+    )
+
+    raw_result = await structured_llm.ainvoke(prompt)
+    result = (
+        raw_result
+        if isinstance(raw_result, HandoffPacket)
+        else HandoffPacket.model_validate(raw_result)
+    )
+    result.ticket_id = ticket_id
+    if not result.escalation_reason:
+        result.escalation_reason = escalation_reason
+
+    if result.is_over_budget():
+        retry_prompt = prompt + (
+            "\n\nThe previous attempt was too long. Be far more concise: merge "
+            "similar facts into one entry each, and drop anything non-essential."
+        )
+        raw_retry = await structured_llm.ainvoke(retry_prompt)
+        result = (
+            raw_retry
+            if isinstance(raw_retry, HandoffPacket)
+            else HandoffPacket.model_validate(raw_retry)
+        )
+        result.ticket_id = ticket_id
+        if not result.escalation_reason:
+            result.escalation_reason = escalation_reason
+        if result.is_over_budget():
+            result = _truncate_packet(result)
+
+    return _redact_packet(result)
 
 
 def initial_packet(ticket_id: str) -> HandoffPacket:
-    """TODO(M1): empty packet for a brand-new session at the Front Desk.
+    """Empty packet for a brand-new session at the Front Desk.
 
     Nothing has been tried yet, so every list is empty and escalation_reason is "".
     """
-    raise NotImplementedError
+    return HandoffPacket(
+        ticket_id=ticket_id,
+        customer_intent="",
+        escalation_reason="",
+    )

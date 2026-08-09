@@ -14,12 +14,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from backend.config.schema import Tier
+from backend.config.schema import ORDER, Tier, next_tier
+from backend.graph.state import CoCState  # noqa: TC001 - needed at runtime; see
+
+# the identical note in backend/graph/tiers/base.py.
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
-
-    from backend.graph.state import CoCState
 
 
 class UserIntent(BaseModel):
@@ -42,83 +43,357 @@ class UserIntent(BaseModel):
     )
 
 
-def build_graph() -> CompiledStateGraph:
-    """TODO(M1): assemble the parent graph.
+def _last_user_text(messages: list) -> str:
+    for msg in reversed(messages):
+        if getattr(msg, "type", None) == "human":
+            content = msg.content
+            return content if isinstance(content, str) else str(content)
+    return ""
 
-    Nodes:
-      classify   — UserIntent on each user turn
-      route      — dispatch to the subgraph for state["current_tier"]
-      front_desk / manager / vice_president / ceo  — the four subgraphs
-      consent    — HITL interrupt for agent-initiated escalation
-      handoff    — summarize_for_handoff(), then advance the tier
-      human      — CEO-tier human escalation (M4); returns to the CEO, not END
 
-    Compile with a checkpointer:
-      TODO(M1): MemorySaver for dev.
-      TODO(M5): Postgres checkpointer for anything real — MemorySaver loses every
-        conversation on restart, including sessions paused at an interrupt.
-    """
-    raise NotImplementedError
+def _summarize_packet_for_ui(packet) -> str:  # noqa: ANN001
+    """Short human-readable line for the tier_change transition divider, e.g.
+    'Carrying over: account #48812, Okta IdP, cert issues ruled out'."""
+    bits = [*packet.verified_facts[:2], *packet.ruled_out[:1]]
+    if not bits:
+        return "Carrying over: your conversation so far."
+    return "Carrying over: " + "; ".join(bits)
+
+
+CLASSIFY_FEWSHOT = """\
+Examples:
+- "I want to talk to upper management right now." -> wants_escalation=true
+- "can I speak to someone more senior" -> wants_escalation=true
+- "is there a manager around" -> wants_escalation=true
+- "you're not helping, who's your boss" -> wants_escalation=true
+- "this is really frustrating" -> wants_escalation=false (venting, not asking for anyone)
+- "what are your store hours?" -> wants_escalation=false (ordinary question)
+- "my order never arrived and I am furious" -> wants_escalation=false (complaint,
+  no request for escalation)
+"""
 
 
 async def classify_intent(state: CoCState) -> dict:
-    """TODO(M1): structured-output UserIntent over the latest user message.
+    """Structured-output UserIntent over the latest user message.
 
     Use the Front Desk (cheapest) model regardless of current tier — this runs on
-    every turn and does not need a large model.
+    every turn and does not need a large model. Small models need the few-shot
+    examples below to reliably separate "asking for someone senior" from
+    ordinary frustration — tested against the exact phrasings this classifier
+    must distinguish (see tests/test_supervisor.py).
     """
-    raise NotImplementedError
+    from backend.config.loader import get_config
+    from backend.graph.tiers.base import make_model
+
+    config = get_config()
+    model = make_model(config.models.front_desk, [], temperature=0)
+    model = model.with_structured_output(UserIntent)
+    text = _last_user_text(state["messages"])
+    prompt = (
+        "You are a classifier for a customer support chat. Decide if the "
+        "customer is explicitly asking to be escalated to a more senior person "
+        "(a manager, supervisor, someone in charge), in any phrasing — including "
+        "indirect requests like asking who is in charge or if a manager is "
+        "available. Frustration or a hard question, without an actual request "
+        "for someone senior, is wants_escalation=false.\n\n"
+        f"{CLASSIFY_FEWSHOT}\n"
+        f"Customer message: {text!r}\n"
+    )
+    intent: UserIntent = await model.ainvoke(prompt)
+
+    updates: dict = {
+        # per-turn HITL bookkeeping resets with every new user message
+        "context_request_count": 0,
+    }
+
+    if intent.wants_escalation:
+        current_tier = state["current_tier"]
+        target = next_tier(current_tier)
+        updates["pending_escalation"] = {
+            "from_tier": current_tier,
+            "to_tier": target if target is not None else current_tier,
+            "reason": "the customer asked to speak with someone more senior",
+            "user_initiated": True,
+        }
+    else:
+        updates["pending_escalation"] = None
+
+    return updates
 
 
 def route_from_classification(state: CoCState) -> str:
-    """TODO(M1): decide the next node after classification.
+    """Decide the next node after classification.
 
     Rules, in order:
       1. wants_escalation and current_tier is not CEO  -> "handoff"
          USER-INITIATED ESCALATION SKIPS THE CONSENT GATE. The customer already
          asked; asking "are you sure?" is exactly the runaround they are trying
          to escape.
-      2. wants_escalation and current_tier is CEO      -> "human" (M4)
+      2. wants_escalation and current_tier is CEO      -> "human"
       3. otherwise                                     -> the current tier's node
 
     ⚠ Nothing here may route DOWNWARD. is_simple_question is telemetry only.
     """
-    raise NotImplementedError
+    pending = state.get("pending_escalation")
+    if pending is not None and pending.get("user_initiated"):
+        if state["current_tier"] == Tier.CEO:
+            return "human"
+        return "handoff"
+    return state["current_tier"].value
 
 
 def route_from_tier(state: CoCState) -> str:
-    """TODO(M1): decide what happens after a tier finishes its loop.
+    """Decide what happens after a tier finishes its loop.
 
       - pending_context_question set        -> "context_request" (HITL)
-      - pending_escalation and at CEO       -> "human" (M4)
+      - pending_escalation and at CEO       -> "human"
       - pending_escalation, consent needed  -> "consent"
       - pending_escalation, consent waived  -> "handoff"
-      - attempt_count >= max_attempts       -> force an escalation request
+      - attempt_count >= max_attempts       -> force straight to handoff/human,
+        skipping consent — repeatedly asking "are you sure?" IS the failure mode
+        max_attempts exists to stop.
       - otherwise                           -> END (reply to the user)
     """
-    raise NotImplementedError
+    from backend.config.loader import get_config
+
+    if state.get("pending_context_question"):
+        return "context_request"
+
+    pending = state.get("pending_escalation")
+    if pending is None:
+        return "end"
+
+    if state["current_tier"] == Tier.CEO:
+        return "human"
+
+    config = get_config()
+    attempt_count = state.get("attempt_count", 0)
+    forced = attempt_count >= config.escalation.max_attempts_per_tier
+    consent_needed = config.escalation.require_user_consent and not forced
+
+    return "consent" if consent_needed else "handoff"
+
+
+def route_from_consent(state: CoCState) -> str:
+    """After the consent interrupt resumes: approved -> handoff, declined -> end."""
+    return "handoff" if state.get("pending_escalation") else "end"
+
+
+def route_after_context(state: CoCState) -> str:
+    """After a context-request interrupt resumes, hand control back to whichever
+    tier is currently active so it can continue reasoning with the new answer."""
+    return state["current_tier"].value
+
+
+async def consent_node(state: CoCState) -> dict:
+    from backend.graph.middleware.hitl import request_escalation_consent
+
+    pending = state["pending_escalation"]
+    return await request_escalation_consent(
+        state, pending["from_tier"], pending["to_tier"], pending["reason"]
+    )
+
+
+async def context_request_node(state: CoCState) -> dict:
+    from backend.graph.middleware.hitl import request_context
+
+    question = state["pending_context_question"]
+    return await request_context(state, question)
+
+
+async def human_escalation_node(state: CoCState) -> dict:
+    """CEO-tier human escalation. Full notification channels (email/push/
+    scheduling) land in M4 — backend/notifications/. This M1 version records the
+    escalation and keeps the session live, satisfying the invariant that a
+    human hop never ends the conversation.
+    """
+    from langchain_core.messages import AIMessage
+
+    from backend.config.loader import get_config
+
+    config = get_config()
+    admin = config.escalation.human_admin
+    channels = [
+        c
+        for c, present in (
+            ("email", admin.email),
+            ("push", admin.push_topic),
+            ("scheduling", admin.scheduling_link),
+        )
+        if present
+    ]
+    text = (
+        "I've exhausted what I can do from here, so I've flagged this for a "
+        "member of our team to follow up personally. In the meantime, I'm still "
+        "right here if there's anything else I can help with."
+    )
+    return {
+        "messages": [AIMessage(content=text)],
+        "human_notified": True,
+        "pending_escalation": None,
+        "_last_human_escalation_channels": channels,  # read by the API layer
+    }
+
+
+async def announce_new_tier(state: CoCState) -> dict:
+    """The introduction for the tier just handed off to. Runs in the SAME turn
+    as the handoff (not deferred to the next user message) so the customer sees
+    the new persona introduce itself as part of the escalation moment, not after
+    sending another message into the void."""
+    from backend.config.loader import get_config
+    from backend.graph.tiers.base import introduce
+
+    persona = get_config().personas.get(state["current_tier"])
+    return await introduce(state, persona)
 
 
 async def do_handoff(state: CoCState) -> dict:
-    """TODO(M1): perform the transition.
+    """Perform the transition.
 
       1. summarize_for_handoff(messages, state["packet"], from, to, reason, ticket)
       2. current_tier = next_tier(current_tier)   <- the ONLY write to this field
       3. tier_just_changed = True, attempt_count = 0, pending_escalation = None
-      4. emit `tier_change` so the frontend re-themes
+      4. stash a tier_change summary for the API layer to emit as an event
 
-    TODO(M1): assert the new tier index > old tier index before committing.
-      Fail loudly rather than silently descalating — a silent descalation would
-      look like a confusing UI bug and be miserable to track down.
+    Asserts the new tier index > old tier index before committing. Fails loudly
+    rather than silently descalating — a silent descalation would look like a
+    confusing UI bug and be miserable to track down.
     """
-    raise NotImplementedError
+    from langgraph.graph.message import REMOVE_ALL_MESSAGES, RemoveMessage
+
+    from backend.config.loader import get_config
+    from backend.graph.handoff import summarize_for_handoff
+    from backend.graph.state import reset_for_tier
+
+    pending = state["pending_escalation"]
+    if pending is None:
+        msg = "do_handoff called with no pending_escalation"
+        raise RuntimeError(msg)
+
+    from_tier: Tier = pending["from_tier"]
+    reason: str = pending["reason"]
+    to_tier = next_tier(from_tier)
+
+    if to_tier is None or ORDER.index(to_tier) <= ORDER.index(state["current_tier"]):
+        msg = (
+            f"Refusing to hand off from {from_tier} to {to_tier}: this would not "
+            f"be a forward move from current_tier={state['current_tier']}. "
+            f"Escalation must be monotonic."
+        )
+        raise RuntimeError(msg)
+
+    new_packet = await summarize_for_handoff(
+        state["messages"], state.get("packet"), from_tier, to_tier, reason, state["ticket_id"]
+    )
+
+    config = get_config()
+    persona_from = config.personas.get(from_tier)
+    persona_to = config.personas.get(to_tier)
+
+    updates = reset_for_tier(state, to_tier)
+    updates["packet"] = new_packet
+    # The next tier's LLM context starts clean — it reasons over the handoff
+    # packet, not the raw transcript. The frontend keeps its own running
+    # transcript client-side, so nothing is lost for the customer.
+    updates["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
+    updates["_last_tier_change"] = {
+        "type": "tier_change",
+        "from_tier": from_tier.value,
+        "to_tier": to_tier.value,
+        "from_persona": persona_from.name,
+        "to_persona": persona_to.name,
+        "theme": persona_to.theme,
+        "reason": reason,
+        "packet_summary": _summarize_packet_for_ui(new_packet),
+    }
+    return updates
 
 
-# TODO(M1): enforce escalation.max_attempts_per_tier. After N unresolved turns the
-#   tier stops insisting it can cope and requests escalation itself. Without this,
-#   a stubborn small model loops forever at the Front Desk.
+def build_graph() -> CompiledStateGraph:
+    """Assemble the parent graph.
+
+    Nodes:
+      classify   — UserIntent on each user turn
+      front_desk / manager / vice_president / ceo  — the four subgraphs
+      consent    — HITL interrupt for agent-initiated escalation
+      context_request — HITL interrupt for a needed customer fact
+      handoff    — summarize_for_handoff(), then advance the tier
+      human      — CEO-tier human escalation; returns to the CEO, not END
+
+    Compiled with MemorySaver for dev.
+    TODO(M5): Postgres checkpointer for anything real — MemorySaver loses every
+      conversation on restart, including sessions paused at an interrupt.
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+    from langgraph.graph import END, StateGraph
+
+    from backend.config.loader import get_config
+    from backend.graph.tiers import ceo as ceo_tier
+    from backend.graph.tiers import front_desk as front_desk_tier
+    from backend.graph.tiers import manager as manager_tier
+    from backend.graph.tiers import vice_president as vp_tier
+
+    config = get_config()
+
+    graph = StateGraph(CoCState)
+    graph.add_node("classify", classify_intent)
+    graph.add_node(Tier.FRONT_DESK.value, front_desk_tier.build(config.models.front_desk))
+    graph.add_node(Tier.MANAGER.value, manager_tier.build(config.models.manager))
+    graph.add_node(Tier.VICE_PRESIDENT.value, vp_tier.build(config.models.vice_president))
+    graph.add_node(Tier.CEO.value, ceo_tier.build(config.models.ceo))
+    graph.add_node("consent", consent_node)
+    graph.add_node("context_request", context_request_node)
+    graph.add_node("handoff", do_handoff)
+    # Registered as "introduce" (same name the tier subgraphs use internally)
+    # so the API layer can detect an agent introduction with one check
+    # regardless of whether it happened at session start or after a handoff.
+    graph.add_node("introduce", announce_new_tier)
+    graph.add_node("human", human_escalation_node)
+
+    graph.set_entry_point("classify")
+
+    tier_map = {t.value: t.value for t in ORDER}
+    graph.add_conditional_edges(
+        "classify", route_from_classification, {**tier_map, "handoff": "handoff", "human": "human"}
+    )
+
+    for tier in ORDER:
+        graph.add_conditional_edges(
+            tier.value,
+            route_from_tier,
+            {
+                "context_request": "context_request",
+                "consent": "consent",
+                "handoff": "handoff",
+                "human": "human",
+                "end": END,
+            },
+        )
+
+    graph.add_conditional_edges("consent", route_from_consent, {"handoff": "handoff", "end": END})
+    graph.add_conditional_edges("context_request", route_after_context, tier_map)
+    graph.add_edge("handoff", "introduce")
+    graph.add_edge("introduce", END)
+    graph.add_edge("human", END)
+
+    # Checkpointing round-trips Tier (a StrEnum) and HandoffPacket (a Pydantic
+    # model) through msgpack. Both are simple, stable value types, so they're
+    # explicitly allowlisted rather than left to trip the "unregistered type"
+    # deprecation warning (and a future hard failure).
+    serde = JsonPlusSerializer(
+        allowed_msgpack_modules=[
+            ("backend.config.schema", "Tier"),
+            ("backend.graph.handoff", "HandoffPacket"),
+            ("backend.graph.handoff", "AttemptedAction"),
+        ]
+    )
+    return graph.compile(checkpointer=MemorySaver(serde=serde))
+
+
+# Escalation.max_attempts_per_tier is enforced in route_from_tier: once hit, the
+#   supervisor stops asking for consent on every unresolved turn and hands off
+#   directly. Without this a stubborn small model loops forever at the Front Desk.
 
 # TODO(M5): emit one trace span per tier, all under a single ticket-level trace.
 #   One trace per ticket, not per tier — the point is seeing the whole journey.
-
-_ = Tier  # staged for the implementations above

@@ -4,26 +4,59 @@
 
 /* Per-tier theming is driven by CSS custom properties set on a root wrapper by
    themes/applyTheme(). Defaults below are the Front Desk (slate) values, so the
-   first paint is correct before config loads.
-
-   TODO(M1): fill in real values, matching THEMES.slate in src/themes/index.ts. */
+   first paint is correct before config loads. */
 :root {
-  --tier-bg: ;
-  --tier-surface: ;
-  --tier-accent: ;
-  --tier-text: ;
-  --tier-muted: ;
+  --tier-bg: #f8fafc;
+  --tier-surface: #ffffff;
+  --tier-accent: #475569;
+  --tier-text: #0f172a;
+  --tier-muted: #475569;
 
   /* Cross-fade duration for the escalation transition. Coordinated with
      useEscalation's sequence — change both together. */
   --tier-transition-ms: 400ms;
 }
 
-/* TODO(M1): transition background-color / border-color / color on themed
-   elements using --tier-transition-ms, so the theme swap animates rather than
-   snapping. */
+body {
+  margin: 0;
+  background-color: var(--tier-bg);
+  color: var(--tier-text);
+}
+
+.theme-root {
+  min-height: 100vh;
+  background-color: var(--tier-bg);
+  color: var(--tier-text);
+  transition:
+    background-color var(--tier-transition-ms) ease,
+    color var(--tier-transition-ms) ease;
+}
+
+.theme-surface {
+  background-color: var(--tier-surface);
+  border-color: color-mix(in srgb, var(--tier-accent) 20%, transparent);
+  transition:
+    background-color var(--tier-transition-ms) ease,
+    border-color var(--tier-transition-ms) ease;
+}
+
+.theme-accent {
+  color: var(--tier-accent);
+  transition: color var(--tier-transition-ms) ease;
+}
+
+.theme-muted {
+  color: var(--tier-muted);
+  transition: color var(--tier-transition-ms) ease;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  /* TODO(M1): zero out transitions. The divider and its content still render —
-     only the motion is optional. */
+  .theme-root,
+  .theme-surface,
+  .theme-accent,
+  .theme-muted,
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

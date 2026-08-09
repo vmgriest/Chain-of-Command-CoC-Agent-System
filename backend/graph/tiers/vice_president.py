@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from backend.config.loader import get_config
 from backend.config.schema import Tier
+from backend.graph.tiers.base import build_tier
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -24,15 +26,28 @@ CEO can involve a human.
 
 
 def build(model_id: str) -> CompiledStateGraph:
-    """TODO(M1): build_tier(Tier.VICE_PRESIDENT, ..., tools=stub_tools(), ...)
+    """build_tier(Tier.VICE_PRESIDENT, ..., tools=stub_tools(), ...)
     TODO(M3): tools = manager.real_tools() + registry.tools_for_tier(VICE_PRESIDENT)"""
-    raise NotImplementedError
+    persona = get_config().personas.vice_president
+    return build_tier(Tier.VICE_PRESIDENT, persona, model_id, stub_tools(), CAPABILITY_DESCRIPTION)
 
 
 def stub_tools() -> list[BaseTool]:
-    """TODO(M1): Manager stubs plus one stub external tool (fake web_search) so
-    the M1 slice exercises the "external tool" path before MCP exists."""
-    raise NotImplementedError
+    """Manager stubs plus one stub external tool (fake web_search) so the M1
+    slice exercises the "external tool" path before MCP exists."""
+    from langchain_core.tools import tool
+
+    from backend.graph.tiers.manager import stub_tools as manager_stub_tools
+
+    @tool
+    def web_search(query: str) -> str:
+        """Search the live web for information not in the company knowledge base."""
+        return (
+            f"STUB: web search for {query!r} — no external MCP server connected yet. "
+            f"(Real live web search lands in M3.)"
+        )
+
+    return [*manager_stub_tools(), web_search]
 
 
 # TODO(M3): concurrent tool execution.

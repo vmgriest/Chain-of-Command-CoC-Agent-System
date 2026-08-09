@@ -71,6 +71,13 @@ export interface ErrorEvent {
   recoverable: boolean;
 }
 
+/** The current turn's streaming is done — whether it ended normally or paused
+ *  at an interrupt. The client cannot tell "no tokens yet" from "no tokens
+ *  ever" without this, so it's explicit rather than inferred. */
+export interface TurnEndEvent {
+  type: 'turn_end';
+}
+
 export type ServerEvent =
   | TokenEvent
   | AgentIntroEvent
@@ -78,7 +85,8 @@ export type ServerEvent =
   | EscalationPromptEvent
   | ContextRequestEvent
   | HumanEscalationEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | TurnEndEvent;
 
 // --- client -> server ------------------------------------------------------
 
@@ -103,6 +111,7 @@ export type ClientEvent = UserMessage | EscalationResponse | ContextResponse;
 
 export interface ChatMessage {
   id: string;
+  kind: 'message';
   role: 'user' | 'agent';
   content: string;
   /** Which tier said it — messages keep their original tier styling after an

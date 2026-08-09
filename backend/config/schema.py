@@ -8,7 +8,7 @@ config should fail loudly at startup, never halfway through a customer conversat
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
@@ -30,8 +30,15 @@ class Tier(StrEnum):
     CEO = "ceo"
 
 
-# TODO(M1): ORDER = [Tier.FRONT_DESK, Tier.MANAGER, Tier.VICE_PRESIDENT, Tier.CEO]
-# TODO(M1): next_tier(tier) -> Tier | None  — returns None at CEO (top of ladder).
+ORDER: list[Tier] = [Tier.FRONT_DESK, Tier.MANAGER, Tier.VICE_PRESIDENT, Tier.CEO]
+
+
+def next_tier(tier: Tier) -> Tier | None:
+    """The tier one rung up, or None if already at the top (CEO)."""
+    idx = ORDER.index(tier)
+    if idx + 1 >= len(ORDER):
+        return None
+    return ORDER[idx + 1]
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +78,18 @@ class Persona(BaseModel):
     title: str
     theme: str = "slate"
 
-    # TODO(M1): validator — `theme` must exist in the known theme set.
-    #   Keep the known set in one place shared with the frontend types.
+    # Known theme set is shared with frontend/src/themes/index.ts THEMES keys.
+    # Kept as a soft check (warn via ValueError) rather than importing the
+    # frontend module — the two are mirrored by convention, checked here.
+    KNOWN_THEMES: ClassVar[frozenset[str]] = frozenset({"slate", "amber", "indigo", "obsidian"})
+
+    @field_validator("theme")
+    @classmethod
+    def _theme_is_known(cls, v: str) -> str:
+        if v not in cls.KNOWN_THEMES:
+            msg = f"Unknown theme {v!r}. Known themes: {sorted(cls.KNOWN_THEMES)}"
+            raise ValueError(msg)
+        return v
 
 
 class PersonaSet(BaseModel):
@@ -83,7 +100,8 @@ class PersonaSet(BaseModel):
     vice_president: Persona
     ceo: Persona
 
-    # TODO(M1): get(tier: Tier) -> Persona
+    def get(self, tier: Tier) -> Persona:
+        return getattr(self, tier.value)  # type: ignore[no-any-return]
 
 
 class ModelSet(BaseModel):
@@ -96,9 +114,8 @@ class ModelSet(BaseModel):
     ceo: str
     embedding: str = "nomic-embed-text"
 
-    # TODO(M1): get(tier: Tier) -> str
-    # TODO(M0): startup check — warn if a model is not present in `ollama list`
-    #   rather than failing on first user message.
+    def get(self, tier: Tier) -> str:
+        return getattr(self, tier.value)  # type: ignore[no-any-return]
 
 
 class KnowledgeConfig(BaseModel):
@@ -133,18 +150,39 @@ class MCPServerConfig(BaseModel):
     @field_validator("command")
     @classmethod
     def _command_is_allowlisted(cls, v: str | None) -> str | None:
-        """TODO(M1): reject anything outside ALLOWED_STDIO_BINARIES.
+        """Reject anything outside ALLOWED_STDIO_BINARIES.
 
-        Raise ValueError naming the offending binary and listing what is allowed.
-        This is the check that makes `"command": "bash"` fail at startup.
+        This is the check that makes `"command": "bash"` fail at startup. It is
+        a usability check, not the security boundary — spawn-time enforcement
+        in backend/mcp/sandbox.py is what actually stops process creation.
         """
-        raise NotImplementedError
+        if v is not None and v not in ALLOWED_STDIO_BINARIES:
+            msg = (
+                f"stdio command {v!r} is not allowlisted. "
+                f"Allowed binaries: {sorted(ALLOWED_STDIO_BINARIES)}"
+            )
+            raise ValueError(msg)
+        return v
 
     @model_validator(mode="after")
     def _transport_requires_matching_field(self) -> MCPServerConfig:
-        """TODO(M1): stdio requires `command`; http requires `url`. Reject configs
-        that set both, or neither, for the declared transport."""
-        raise NotImplementedError
+        """stdio requires `command`; http requires `url`. Reject configs that
+        set both, or neither, for the declared transport."""
+        if self.transport == "stdio":
+            if self.command is None:
+                msg = f"MCP server {self.name!r}: transport 'stdio' requires 'command'"
+                raise ValueError(msg)
+            if self.url is not None:
+                msg = f"MCP server {self.name!r}: transport 'stdio' must not set 'url'"
+                raise ValueError(msg)
+        elif self.transport == "http":
+            if self.url is None:
+                msg = f"MCP server {self.name!r}: transport 'http' requires 'url'"
+                raise ValueError(msg)
+            if self.command is not None:
+                msg = f"MCP server {self.name!r}: transport 'http' must not set 'command'"
+                raise ValueError(msg)
+        return self
 
 
 class MCPServers(BaseModel):
@@ -157,9 +195,20 @@ class MCPServers(BaseModel):
     internal: list[MCPServerConfig] = Field(default_factory=list)
     external: list[MCPServerConfig] = Field(default_factory=list)
 
-    # TODO(M3): all_servers() -> list[MCPServerConfig]
-    # TODO(M3): servers_for_tier(tier) -> list[MCPServerConfig]
-    # TODO(M3): validator — server names are unique across internal + external.
+    def all_servers(self) -> list[MCPServerConfig]:
+        return [*self.internal, *self.external]
+
+    def servers_for_tier(self, tier: Tier) -> list[MCPServerConfig]:
+        return [s for s in self.all_servers() if tier in s.tiers]
+
+    @model_validator(mode="after")
+    def _names_are_unique(self) -> MCPServers:
+        names = [s.name for s in self.all_servers()]
+        dupes = {n for n in names if names.count(n) > 1}
+        if dupes:
+            msg = f"MCP server names must be unique across internal+external: {sorted(dupes)}"
+            raise ValueError(msg)
+        return self
 
 
 class HumanAdmin(BaseModel):
@@ -170,7 +219,15 @@ class HumanAdmin(BaseModel):
     push_topic: str | None = None
     scheduling_link: HttpUrl | None = None
 
-    # TODO(M4): model_validator — require at least one channel to be non-None.
+    @model_validator(mode="after")
+    def _at_least_one_channel(self) -> HumanAdmin:
+        if self.email is None and self.push_topic is None and self.scheduling_link is None:
+            msg = (
+                "human_admin needs at least one channel (email, push_topic, or "
+                "scheduling_link) — CEO escalation would otherwise have nowhere to go"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class EscalationConfig(BaseModel):
@@ -203,10 +260,17 @@ class CompanyConfig(BaseModel):
 
     @model_validator(mode="after")
     def _front_desk_has_no_tools(self) -> CompanyConfig:
-        """TODO(M1): reject any MCP server listing `front_desk` in its `tiers`.
+        """Reject any MCP server listing `front_desk` in its `tiers`.
 
         The Front Desk having an EMPTY tool registry — not a filtered one — is a
         core invariant of the design. Enforce it at config load so a company
         cannot accidentally opt out of it.
         """
-        raise NotImplementedError
+        offenders = [s.name for s in self.mcp_servers.all_servers() if Tier.FRONT_DESK in s.tiers]
+        if offenders:
+            msg = (
+                f"front_desk must never receive MCP tools (invariant), but "
+                f"these servers list it in 'tiers': {offenders}"
+            )
+            raise ValueError(msg)
+        return self

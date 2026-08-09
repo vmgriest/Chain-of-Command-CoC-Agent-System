@@ -6,60 +6,106 @@ import pytest
 
 # --- shared loop (base.py) ------------------------------------------------
 
-# TODO(M1): test_build_tier_with_no_tools_omits_tool_node
-# TODO(M1): test_build_tier_with_tools_includes_tool_node
-# TODO(M1): test_persona_name_comes_from_config
-#   Rename the persona in config; the introduction changes. Nothing hardcoded.
 
-# TODO(M1): test_verdict_sets_escalation_reason_when_stuck
-#   can_resolve False must come with a specific reason, not None and not vague.
+def test_build_tier_with_no_tools_omits_tool_node() -> None:
+    from backend.config.loader import get_config
+    from backend.config.schema import Tier
+    from backend.graph.tiers.base import build_tier
 
-# TODO(M1): test_attempt_count_increments_on_unresolved_turn
-
-
-# --- front desk -----------------------------------------------------------
-
-# TODO(M1): test_front_desk_admits_knowledge_limits
-#   Asked about something past its cutoff, it says so and offers to escalate
-#   rather than confabulating. This is the tier's defining behaviour.
-
-# TODO(M5): test_off_scope_question_is_declined_not_escalated
-#   Off-topic questions get declined politely. Escalating them just moves the
-#   problem up the ladder.
+    persona = get_config().personas.front_desk
+    compiled = build_tier(Tier.FRONT_DESK, persona, "llama3.2:latest", [], "no tools")
+    assert "tools" not in compiled.get_graph().nodes
 
 
-# --- manager --------------------------------------------------------------
+def test_build_tier_with_tools_includes_tool_node() -> None:
+    from langchain_core.tools import tool
 
-# TODO(M2): test_manager_cites_sources
-#   RAG-backed answers carry citations. Uncited claims are not acceptable.
+    from backend.config.loader import get_config
+    from backend.config.schema import Tier
+    from backend.graph.tiers.base import build_tier
 
-# TODO(M2): test_manager_escalates_when_rag_empty
-#   Empty retrieval is a valid signal, and grounds for escalation — not a cue to
-#   answer from the model's own memory.
+    @tool
+    def dummy_tool(x: str) -> str:
+        """A dummy tool."""
+        return x
 
-# TODO(M2): test_scrape_url_rejects_off_allowlist
-#   Including redirects that leave the allowlist. Same SSRF hole with an extra step.
-
-
-# --- vice president -------------------------------------------------------
-
-# TODO(M3): test_vp_receives_external_mcp_tools
-# TODO(M3): test_vp_parallelizes_independent_tool_calls
-#   asyncio.gather over different tools. Calls to the SAME tool may have ordering
-#   dependencies — only parallelize across distinct tools.
+    persona = get_config().personas.manager
+    compiled = build_tier(Tier.MANAGER, persona, "llama3:8b", [dummy_tool], "has tools")
+    assert "tools" in compiled.get_graph().nodes
 
 
-# --- ceo ------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_persona_name_comes_from_config() -> None:
+    """Rename the persona; the introduction changes. Nothing hardcoded."""
+    from backend.config.schema import Persona
+    from backend.graph.handoff import initial_packet
+    from backend.graph.tiers.base import introduce
 
-# TODO(M4): test_optimizer_loop_terminates
-#   Bounded by iterations AND tokens. Returns the best draft on exhaustion,
-#   never an error — an imperfect answer beats a failure.
+    custom_persona = Persona(name="Zara", title="Lead Concierge", theme="slate")
+    state = {"packet": initial_packet("coc_x")}
+    updates = await introduce(state, custom_persona)
+    text = updates["messages"][0].content
+    assert "Zara" in text
+    assert "Lead Concierge" in text
+    assert updates["tier_just_changed"] is False
 
-# TODO(M4): test_evaluator_is_separate_call
-#   Not the drafter grading itself. One call doing both produces agreeable nonsense.
 
-# TODO(M4): test_ceo_answers_simple_followup_without_escalating
-#   "What's your refund window?" at CEO tier is just answered. No descalation,
-#   no human escalation for something trivial.
+@pytest.mark.asyncio
+async def test_introduction_references_customer_intent_when_known() -> None:
+    from backend.config.schema import Persona
+    from backend.graph.handoff import initial_packet
+    from backend.graph.tiers.base import introduce
 
-_ = pytest
+    packet = initial_packet("coc_x")
+    packet.customer_intent = "SSO login is broken"
+    state = {"packet": packet}
+    updates = await introduce(state, Persona(name="Dwight", title="Manager", theme="amber"))
+    text = updates["messages"][0].content
+    assert "SSO login is broken" in text
+
+
+def test_render_system_prompt_carries_ruled_out_and_facts() -> None:
+    from backend.config.schema import Persona
+    from backend.graph.handoff import HandoffPacket
+    from backend.graph.tiers.base import render_system_prompt
+    from tests.conftest import FakeLLM  # noqa: F401 - not used, keeps import style consistent
+
+    packet = HandoffPacket(
+        ticket_id="coc_x",
+        customer_intent="Cannot log in",
+        verified_facts=["Account #123"],
+        ruled_out=["expired password"],
+        escalation_reason="needs tools",
+    )
+    prompt = render_system_prompt(
+        Persona(name="Dwight", title="Manager", theme="amber"),
+        "Acme Robotics",
+        ["orders"],
+        "You have local tools.",
+        packet,
+    )
+    assert "Account #123" in prompt
+    assert "expired password" in prompt
+    assert "Dwight" in prompt
+    assert "Manager" in prompt
+
+
+def test_make_model_leaves_empty_tool_list_unbound(monkeypatch) -> None:
+    """`tools=[]` must return the model UNBOUND, never `.bind_tools([])` — some
+    providers treat those differently, and the Front Desk guarantee rests on it."""
+    from backend.graph.tiers import base as base_module
+
+    calls: list[str] = []
+
+    class _Model:
+        def bind_tools(self, _tools):
+            calls.append("bind_tools")
+            return self
+
+    monkeypatch.setattr(
+        "langchain_ollama.ChatOllama", lambda **_kw: _Model()
+    )
+
+    result = base_module.make_model("llama3.2:latest", [])
+    assert calls == []  # bind_tools was never called
+    assert isinstance(result, _Model)

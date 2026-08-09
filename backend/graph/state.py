@@ -49,18 +49,54 @@ class CoCState(TypedDict, total=False):
 
     # --- HITL ---
     pending_context_question: str | None
+    context_request_count: int  # per-turn cap; reset when a new user message arrives
+    escalation_declined: bool  # True right after a refusal; suppresses re-asking
+    #   on the very next tier turn so a decline doesn't get immediately re-prompted
 
     # --- CEO / human loop (M4) ---
     human_notified: bool  # session stays LIVE after this flips true
 
+    # --- transient, read once by the API layer to emit the matching WS event ---
+    _last_tier_change: dict | None
+    _last_human_escalation_channels: list[str] | None
 
-# TODO(M1): new_state(session_id) -> CoCState
-#   Fresh session: front_desk, attempt_count 0, initial_packet(), no pendings.
 
-# TODO(M1): reset_for_tier(state, tier) -> dict
-#   Partial update applied on tier change: attempt_count -> 0,
-#   tier_just_changed -> True, pending_escalation -> None.
+def new_state(session_id: str) -> CoCState:
+    """Fresh session: front_desk, attempt_count 0, initial_packet(), no pendings."""
+    import uuid
 
-# TODO(M1): INVARIANT TEST — current_tier must be monotonically non-decreasing
-#   across a session. There is no auto-descalation: once at the CEO, a simple
-#   follow-up question is answered by the CEO, not bounced back to the Front Desk.
+    from backend.graph.handoff import initial_packet
+
+    ticket_id = f"coc_{uuid.uuid4().hex}"
+    return CoCState(
+        messages=[],
+        session_id=session_id,
+        ticket_id=ticket_id,
+        current_tier=Tier.FRONT_DESK,
+        tier_just_changed=True,
+        packet=initial_packet(ticket_id),
+        attempt_count=0,
+        pending_escalation=None,
+        pending_context_question=None,
+        context_request_count=0,
+        escalation_declined=False,
+        human_notified=False,
+    )
+
+
+def reset_for_tier(state: CoCState, tier: Tier) -> dict:
+    """Partial update applied on tier change: attempt_count -> 0,
+    tier_just_changed -> True, pending_escalation -> None."""
+    return {
+        "current_tier": tier,
+        "attempt_count": 0,
+        "tier_just_changed": True,
+        "pending_escalation": None,
+    }
+
+
+# INVARIANT — current_tier must be monotonically non-decreasing across a
+#   session. There is no auto-descalation: once at the CEO, a simple follow-up
+#   question is answered by the CEO, not bounced back to the Front Desk.
+#   Enforced in backend/graph/supervisor.py::do_handoff; tested in
+#   tests/test_invariants.py.

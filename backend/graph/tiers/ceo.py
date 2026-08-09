@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from backend.config.loader import get_config
 from backend.config.schema import Tier
+from backend.graph.tiers.base import build_tier
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -57,14 +59,27 @@ class DraftEvaluation(BaseModel):
 
 
 def build(model_id: str) -> CompiledStateGraph:
-    """TODO(M1): build_tier(Tier.CEO, ..., tools=stub_tools(), ...)
+    """build_tier(Tier.CEO, ..., tools=stub_tools(), ...)
     TODO(M4): wrap the agent node in the evaluator-optimizer loop below."""
-    raise NotImplementedError
+    persona = get_config().personas.ceo
+    return build_tier(Tier.CEO, persona, model_id, stub_tools(), CAPABILITY_DESCRIPTION)
 
 
 def stub_tools() -> list[BaseTool]:
-    """TODO(M1): VP stubs plus a stub notify_human()."""
-    raise NotImplementedError
+    """VP stubs plus a stub notify_human()."""
+    from langchain_core.tools import tool
+
+    from backend.graph.tiers.vice_president import stub_tools as vp_stub_tools
+
+    @tool
+    def notify_human(reason: str) -> str:
+        """Loop in a human admin when every automated option is exhausted."""
+        return (
+            f"STUB: would notify the human admin now (reason: {reason!r}). "
+            f"(Real email/push/scheduling notifications land in M4.)"
+        )
+
+    return [*vp_stub_tools(), notify_human]
 
 
 # TODO(M4): optimize_loop(state) -> str
