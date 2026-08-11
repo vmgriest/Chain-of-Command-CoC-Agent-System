@@ -81,14 +81,40 @@ def load_config(path: Path | None = None) -> CompanyConfig:
 
 @lru_cache(maxsize=1)
 def get_config() -> CompanyConfig:
-    """Cached accessor used everywhere else in the codebase.
-
-    TODO(M5): config hot reload — expose reload_config() that clears this cache
-    and re-runs the MCP registry wiring. Note that changing model ids mid-session
-    would swap an agent's brain underneath a live conversation; decide whether
-    reload applies to new sessions only.
-    """
+    """Cached accessor used everywhere else in the codebase."""
     return load_config()
+
+
+def reload_config(path: Path | None = None) -> CompanyConfig:
+    """Re-read and re-validate company_config.json without restarting the
+    process, swapping the cached config atomically: reload_config() either
+    fully succeeds or leaves the previous (still valid) config in place —
+    never a half-applied state a customer mid-conversation could be served
+    against. Raises ConfigError on an invalid file, same as load_config().
+
+    What picks this up immediately, with NO graph rebuild required — every
+    call site below reads get_config() fresh, per-call, not once at startup:
+      - backend/graph/tiers/manager.py's tools (rag_search's qdrant_collection,
+        scrape_url's domain allowlist, run_code)
+      - support_scope (guardrails, the system prompt's "we handle X" line)
+      - escalation policy (max_attempts_per_tier, require_user_consent)
+      - human_admin channels (email/scheduling — read at the moment of an
+        actual escalation, not cached anywhere)
+
+    What does NOT take effect without a full graph rebuild (a process
+    restart, in this dev-only MemorySaver setup — see the TODO on
+    build_graph() about a persistent checkpointer): model ids and personas.
+    Both are resolved ONCE per tier when backend/graph/supervisor.py's
+    build_graph() compiles each tier's subgraph, and baked into that
+    compiled graph via closures (make_model(), render_system_prompt's
+    `persona` parameter). Swapping a model or persona underneath a LIVE
+    conversation graph is exactly the risk this function's original TODO
+    flagged — deliberately out of scope for a reload aimed at content
+    changes (knowledge sources, policy, contact channels), not brain swaps.
+    """
+    validated = load_config(path)  # raises ConfigError; cache untouched on failure
+    get_config.cache_clear()  # next get_config() call re-reads and re-caches lazily
+    return validated
 
 
 def startup_checks(config: CompanyConfig) -> list[str]:

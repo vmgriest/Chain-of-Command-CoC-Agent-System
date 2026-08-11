@@ -50,9 +50,7 @@ MAX_PACKET_TOKENS = 800
 PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "email": re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}"),
     "card": re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)"),
-    "phone": re.compile(
-        r"(?<!\d)(?:\+?1[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)"
-    ),
+    "phone": re.compile(r"(?<!\d)(?:\+?1[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)"),
     "ssn": re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"),
 }
 

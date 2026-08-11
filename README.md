@@ -80,7 +80,7 @@ Everything the Manager has, plus the outside world.
 The last stop. The CEO re-attempts the problem from scratch with the full toolset before reaching for a person.
 
 - **Evaluator–Optimizer loop** — draft, self-critique against the user's actual goal, revise, repeat until the evaluator passes or the budget is spent
-- **Human-in-the-loop escalation** — email the admin, send a push notification, or schedule a call with the customer
+- **Human-in-the-loop escalation** — email the admin or schedule a call with the customer
 - **Observability / tracing** — every tier transition, tool call, and token is traced
 - **Output guardrails** — final check for hallucinated commitments, leaked internals, unsafe advice
 
@@ -123,7 +123,7 @@ On escalation:
               │  (internal + MCP)    │                  │  (all + human)    │
               └──────────────────────┘                  └─────────┬─────────┘
                                                                   │
-                                                     email / push / schedule call
+                                                        email / schedule call
                                                                   ▼
                                                           ┌───────────────┐
                                                           │  Human Admin  │
@@ -208,10 +208,10 @@ Implemented as LangGraph interrupts, so state is checkpointed at the pause and r
               │    LLMs    │  │  vector DB   │  │    MCP    │ │  (sandboxed) │
               └────────────┘  └──────────────┘  └───────────┘ └──────────────┘
                                                                      │
-                                                    ┌────────────────▼──────────────┐
-                                                    │  Notifications: SMTP · push   │
-                                                    │  · calendar scheduling        │
-                                                    └───────────────────────────────┘
+                                                    ┌────────────▼────────────┐
+                                                    │   Notifications: SMTP   │
+                                                    │  · calendar scheduling  │
+                                                    └─────────────────────────┘
 ```
 
 Each tier is a LangGraph subgraph with its own state, tool registry, and loop. The supervisor owns transitions; tiers cannot promote themselves.
@@ -229,7 +229,7 @@ Each tier is a LangGraph subgraph with its own state, tool registry, and loop. T
 | Tool protocol | **MCP** | Internal server (first-party tools) + external servers (third-party) |
 | API | **FastAPI** | Async-native, streams over WebSocket/SSE |
 | Frontend | **React + TypeScript** | Production UI — not Gradio. Per-tier theming, streaming, escalation transitions |
-| Notifications | SMTP · Web Push · calendar API | CEO-tier human escalation |
+| Notifications | SMTP · calendar API | CEO-tier human escalation |
 | Observability | LangSmith / OpenTelemetry | Traces spanning tier boundaries |
 | Isolation | **Docker** | Sandboxed MCP subprocesses and code execution |
 
@@ -285,7 +285,6 @@ At startup the config module parses this file, spawns the declared stdio subproc
     "max_attempts_per_tier": 3,
     "human_admin": {
       "email": "support-lead@acme.com",
-      "push_topic": "acme-escalations",
       "scheduling_link": "https://cal.acme.com/acme-support"
     }
   }
@@ -341,7 +340,7 @@ chain-of-command/
 │   ├── rag/
 │   │   ├── ingest.py              # PDFs, Markdown, crawl → Qdrant
 │   │   └── retriever.py
-│   ├── notifications/             # email · push · scheduling
+│   ├── notifications/             # email · scheduling
 │   ├── config/
 │   │   ├── schema.py              # company_config.json validation
 │   │   └── loader.py
@@ -360,31 +359,46 @@ chain-of-command/
 
 ## Getting started
 
-> **Status:** early development. Steps below describe the intended setup.
+> **Status:** M0–M5 are all built (see [CHECKLIST.md](CHECKLIST.md) for exact
+> per-item status, including what's live-verified vs. implemented-but-not-yet-
+> demoed). Steps below are the real setup, not aspirational.
 
-**Prerequisites:** Docker & Docker Compose · Python 3.11+ · Node 20+ · [Ollama](https://ollama.com)
+**Prerequisites:** Docker & Docker Compose · Python 3.12 · Node 20+ · [Ollama](https://ollama.com) · [uv](https://docs.astral.sh/uv/)
 
 ```bash
 git clone <repo-url> && cd chain-of-command
 
-# 1. Pull the models named in company_config.json
-ollama pull llama3.2:3b
-ollama pull qwen2.5:14b
+# 1. Pull the models named in company_config.json (adjust to what you have —
+#    see CHECKLIST.md for the mapping this repo was actually developed against)
+ollama pull llama3.2
+ollama pull llama3:8b
+ollama pull nomic-embed-text
 
-# 2. Start Qdrant, the internal MCP server, and sandbox infrastructure
+# 2. Start Qdrant
 docker compose up -d
 
 # 3. Configure your company
 cp company_config.example.json company_config.json
 $EDITOR company_config.json
 
-# 4. Ingest knowledge sources into Qdrant
-python -m backend.rag.ingest --config company_config.json
+# 4. Serve the example knowledge site (optional — only needed if you keep the
+#    example config's crawl_urls pointing at docs/example_site/) and ingest
+uv sync
+python -m http.server 8080 --directory docs/example_site &
+uv run python -m backend.rag.ingest --config company_config.json
 
-# 5. Run
-uvicorn backend.api.main:app --reload      # backend  :8000
-cd frontend && npm install && npm run dev  # frontend :5173
+# 5. Start the internal MCP server (exposes rag_search/scrape_url/run_code +
+#    stub order/policy lookups over streamable-HTTP)
+uv run python -m backend.mcp.internal_server --port 9001 &
+
+# 6. Run
+uv run uvicorn backend.api.main:app --reload   # backend  :8000
+cd frontend && npm install && npm run dev      # frontend :5173
 ```
+
+The code sandbox (`run_code`) and any stdio-transport MCP servers declared in
+`company_config.json` need a running Docker daemon — `docker info` should
+succeed before you rely on either.
 
 ---
 
@@ -393,20 +407,22 @@ cd frontend && npm install && npm run dev  # frontend :5173
 - [x] LangGraph tier subgraphs + supervisor routing
 - [x] Handoff packet schema and summarizer
 - [x] HITL interrupt middleware with checkpoint/resume
-- [ ] Internal MCP server
-- [ ] External MCP loader with binary allowlist + Docker sandboxing
-- [ ] Qdrant ingestion (PDF, Markdown, web crawl)
+- [x] Internal MCP server
+- [x] External MCP loader with binary allowlist + Docker sandboxing
+- [x] Qdrant ingestion (PDF, Markdown, web crawl)
 - [x] React frontend with per-tier theming and escalation transitions
-- [ ] CEO evaluator–optimizer loop
-- [ ] Email / push / call-scheduling integrations
-- [ ] Tracing across tier boundaries
-- [ ] Input and output guardrails
-- [ ] `company_config.json` schema validation and hot reload
-- [ ] Escalation-rate and resolution-per-tier analytics
+- [x] CEO evaluator–optimizer loop
+- [x] Email / call-scheduling integrations
+- [x] LangSmith tracing (opt-in via `LANGSMITH_*` env vars)
+- [x] Input and output guardrails
+- [x] `company_config.json` schema validation and hot reload
+- [x] Escalation-rate and resolution-per-tier analytics
 
-M0 and M1 (the vertical slice — see [PLAN.md](PLAN.md)) are built: all four
-tiers reachable, real handoff packets, real HITL consent/context interrupts,
-real per-tier UI theming. Tools above the Front Desk are still stubs pending
-M2 (RAG), M3 (MCP), and M4 (evaluator-optimizer, human notifications). See
-[CHECKLIST.md](CHECKLIST.md) for exact status per item, including what's
+All five milestones from [PLAN.md](PLAN.md) are built. What's still open:
+hybrid (dense+sparse) retrieval, concurrent tool fan-out at the VP tier,
+per-span trace attribute enrichment beyond LangSmith's auto-instrumentation,
+a frontend analytics view (the data's at `GET /api/analytics`, no UI yet),
+and the items in PLAN.md's "Open items" section (auth, a persistent
+checkpointer, multi-tenant deployment) — none of which have been started.
+See [CHECKLIST.md](CHECKLIST.md) for exact status per item, including what's
 live-verified vs. implemented-but-not-yet-demoed.

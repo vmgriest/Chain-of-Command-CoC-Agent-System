@@ -117,7 +117,7 @@ FastAPI, `WebSocket /ws/chat/{session_id}` streaming tokens plus typed control e
 ## Milestone 4 — CEO tier
 
 - Evaluator–optimizer loop: draft → self-critique against the user's stated goal → revise, bounded by iteration count and token budget. The evaluator is a separate structured-output call with explicit pass/fail criteria, not a vibe check.
-- `backend/notifications/` — SMTP to `human_admin.email`, Web Push to `push_topic`, scheduling link surfaced to the customer.
+- `backend/notifications/` — SMTP to `human_admin.email`, scheduling link surfaced to the customer.
 - **Session continuity:** on human escalation, emit `human_escalation`, tell the user exactly what was done and what to expect, and **keep the session live**. The user keeps chatting; the CEO keeps answering.
 
 **Exit:** CEO exhausts its own tooling, emails the admin, and the conversation continues normally afterward.
@@ -146,7 +146,7 @@ backend/graph/supervisor.py                # routing, escalation, transitions
 backend/graph/middleware/{hitl,guardrails}.py
 backend/mcp/{registry,sandbox,internal_server}.py
 backend/rag/{ingest,retriever}.py
-backend/notifications/{email,push,scheduling}.py
+backend/notifications/{email,scheduling}.py
 backend/api/main.py                        # FastAPI + WebSocket
 frontend/src/hooks/useEscalation.ts
 frontend/src/themes/index.ts

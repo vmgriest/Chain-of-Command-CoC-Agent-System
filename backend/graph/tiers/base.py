@@ -24,10 +24,20 @@ from backend.graph.state import CoCState  # noqa: TC001 - needed at runtime for
 # defined below; a TYPE_CHECKING-only import breaks add_conditional_edges.
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from langchain_core.messages import AIMessage, BaseMessage
     from langchain_core.tools import BaseTool
     from langgraph.graph.state import CompiledStateGraph
 
     from backend.graph.handoff import HandoffPacket
+
+    # A hook run on the agent's response ONLY when it did not request a tool
+    # call — i.e. its would-be final answer for the turn. Currently used by
+    # the CEO tier's evaluator-optimizer loop (backend/graph/tiers/ceo.py),
+    # but kept generic here rather than forked into a bespoke CEO loop, same
+    # reasoning as the M3 concurrent-tool-execution TODO below.
+    ResponseOptimizer = Callable[[CoCState, list[BaseMessage], AIMessage], Awaitable[AIMessage]]
 
 
 class TierVerdict(BaseModel):
@@ -38,13 +48,18 @@ class TierVerdict(BaseModel):
     """
 
     can_resolve: bool = Field(
-        description="True if this tier fully answered the question with what it has. "
-        "False if it lacks the knowledge, tools, or access to finish."
+        description="True if this tier gave the customer a complete, actionable answer "
+        "with what it has access to — even if the customer still has to go DO something "
+        "with that answer (follow steps, wait for a shipment, plug in a cable). False "
+        "only if THIS TIER is missing the knowledge, tools, or access needed to answer "
+        "at all — not because the fix requires the customer's own follow-through."
     )
     escalation_reason: str | None = Field(
         default=None,
-        description="When can_resolve is False: the specific missing capability. "
-        "Name the gap ('no access to billing records'), not a feeling.",
+        description="Required when can_resolve is False. A NOUN PHRASE naming the "
+        "specific missing capability ('access to billing records'), not a sentence or a "
+        "feeling — this is inserted directly into \"I don't have {reason} from this "
+        'desk."',
     )
     needs_context: str | None = Field(
         default=None,
@@ -52,6 +67,25 @@ class TierVerdict(BaseModel):
         "order id, ...). Null when nothing is needed — the loop then runs "
         "uninterrupted. Do NOT ask just to confirm you understood.",
     )
+
+
+VERDICT_FEWSHOT = """\
+Examples:
+- Customer asked how to fix error E-317; you gave complete step-by-step reflash
+  instructions from the knowledge base, ending with "contact support if this doesn't
+  work" as a courtesy. -> can_resolve=true (you answered fully; the customer following
+  through on physical steps — or a fallback offer for the rare case it doesn't work —
+  is not the same as YOU being unable to answer)
+- Customer asked for their live order status; you have no order-lookup tool and the
+  packet has no such data. -> can_resolve=false, escalation_reason="access to live
+  order-tracking data"
+- Customer asked a billing question; your tools only cover orders and hardware,
+  nothing about billing. -> can_resolve=false, escalation_reason="access to billing
+  records"
+- A small model tends to under-score its own complete answers out of caution — do not
+  escalate just because the topic is hardware, or because the customer must still take
+  an action. Escalate only when a concrete capability is actually missing.
+"""
 
 
 BASE_SYSTEM_PROMPT = """\
@@ -84,8 +118,12 @@ Instructions:
 - If this is the first turn after a handoff, introduce yourself by name and \
 title before anything else, and briefly acknowledge what you were handed so the \
 customer knows they do not have to start over.
-- Be honest about your limits. Saying "I can't do this from here" and offering \
-to escalate is a good outcome, not a failure.
+- Be honest about your limits: if you truly lack the access, tools, or information \
+needed to help, say so plainly and offer to escalate — that is a good outcome, not a \
+failure. But if you HAVE fully answered the question, give the complete answer and \
+stop there. Do not tack on a routine "escalate if this doesn't work" offer at the end \
+of an answer you already gave in full — only mention escalation when something is \
+genuinely missing.
 - Never promise something you cannot deliver.
 """
 
@@ -171,13 +209,17 @@ def build_tier(
     model_id: str,
     tools: list[BaseTool],
     capability_description: str,
+    response_optimizer: ResponseOptimizer | None = None,
 ) -> CompiledStateGraph:
     """Build one tier's compiled subgraph.
 
     Nodes:
       introduce  — only when state["tier_just_changed"]; streams the self-intro,
                    then clears the flag.
-      agent      — the model call. Tools bound ONLY if `tools` is non-empty.
+      agent      — the model call. Tools bound ONLY if `tools` is non-empty. If
+                   the response does NOT request a tool call and
+                   `response_optimizer` is set, the response is run through it
+                   before being returned (see backend/graph/tiers/ceo.py).
       tools      — ToolNode. NOT ADDED AT ALL when `tools` is empty.
       verdict    — structured TierVerdict; sets pending_escalation when stuck.
 
@@ -188,9 +230,12 @@ def build_tier(
       The Front Desk has no runtime path to a tool call, so no prompt can talk
       it into one.
 
-    TODO(M3): the VP tier needs concurrent tool execution — asyncio.gather over
-      independent calls rather than sequential ToolNode dispatch. Add it here
-      behind a flag so all tiers benefit, rather than forking vice_president.py.
+    Concurrent tool execution when the model requests several independent
+    calls in one turn is NOT custom code here — `langgraph.prebuilt.ToolNode`
+    already runs every tool call in a turn through `asyncio.gather`
+    internally (confirmed against the installed langgraph version: two
+    artificially-slowed 1s tools returned in ~1.0s total through a real
+    compiled graph, not ~2.0s). Nothing to add.
     """
     from langchain_core.messages import SystemMessage
     from langgraph.graph import END, StateGraph
@@ -220,6 +265,8 @@ def build_tier(
         )
         messages = [SystemMessage(content=prompt), *state["messages"]]
         response = await agent_model.ainvoke(messages)
+        if response_optimizer is not None and not getattr(response, "tool_calls", None):
+            response = await response_optimizer(state, messages, response)
         return {"messages": [response]}
 
     def route_after_agent(state: CoCState) -> str:
@@ -237,7 +284,7 @@ def build_tier(
             "\n\nBased on the conversation so far, decide: did you fully resolve "
             "the customer's request with what you have access to? If not, name "
             "the specific missing capability. If you need one specific fact from "
-            "the customer to continue, ask for exactly that."
+            "the customer to continue, ask for exactly that.\n\n" + VERDICT_FEWSHOT
         )
         messages = [SystemMessage(content=prompt), *state["messages"]]
         verdict: TierVerdict = await verdict_model.ainvoke(messages)
@@ -259,7 +306,12 @@ def build_tier(
             updates["pending_escalation"] = {
                 "from_tier": tier,
                 "to_tier": target if target is not None else tier,
-                "reason": verdict.escalation_reason or "unable to resolve at this tier",
+                # Must read as a noun phrase — hitl.py's request_escalation_consent()
+                # slots this straight into "I don't have {reason} from this desk."
+                # Found live: the old fallback ("unable to resolve at this tier") is a
+                # clause, not a noun phrase, producing "I don't have unable to resolve
+                # at this tier from this desk."
+                "reason": verdict.escalation_reason or "everything needed to fully resolve this",
                 "user_initiated": False,
             }
         return updates

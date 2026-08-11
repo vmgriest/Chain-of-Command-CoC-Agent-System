@@ -91,7 +91,11 @@ async def request_escalation_consent(
 
     # Refusal is a first-class outcome: stay at the current tier, and remember
     # the refusal for one turn so the tier does not immediately re-propose it.
-    return {"pending_escalation": None, "escalation_declined": True}
+    return {
+        "pending_escalation": None,
+        "escalation_declined": True,
+        "consent_refusals": state.get("consent_refusals", 0) + 1,
+    }
 
 
 async def request_context(state: CoCState, question: str) -> dict:

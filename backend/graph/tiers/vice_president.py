@@ -26,15 +26,25 @@ CEO can involve a human.
 
 
 def build(model_id: str) -> CompiledStateGraph:
-    """build_tier(Tier.VICE_PRESIDENT, ..., tools=stub_tools(), ...)
-    TODO(M3): tools = manager.real_tools() + registry.tools_for_tier(VICE_PRESIDENT)"""
+    """build_tier(Tier.VICE_PRESIDENT, ..., tools=real_tools(), ...)"""
     persona = get_config().personas.vice_president
-    return build_tier(Tier.VICE_PRESIDENT, persona, model_id, stub_tools(), CAPABILITY_DESCRIPTION)
+    return build_tier(Tier.VICE_PRESIDENT, persona, model_id, real_tools(), CAPABILITY_DESCRIPTION)
+
+
+def real_tools() -> list[BaseTool]:
+    """Everything the Manager has, plus whatever external MCP servers declare
+    `vice_president` in their `tiers`. The registry builds this list once at
+    startup (backend/mcp/registry.py) — the VP tier just reads it."""
+    from backend.graph.tiers.manager import real_tools as manager_real_tools
+    from backend.mcp.registry import get_registry
+
+    mcp_tools = get_registry().tools_for_tier(Tier.VICE_PRESIDENT)
+    return [*manager_real_tools(), *mcp_tools]
 
 
 def stub_tools() -> list[BaseTool]:
-    """Manager stubs plus one stub external tool (fake web_search) so the M1
-    slice exercises the "external tool" path before MCP exists."""
+    """Manager stubs plus one stub external tool (fake web_search). Kept
+    around for tests that want tool-calling plumbing without a live registry."""
     from langchain_core.tools import tool
 
     from backend.graph.tiers.manager import stub_tools as manager_stub_tools
@@ -42,19 +52,12 @@ def stub_tools() -> list[BaseTool]:
     @tool
     def web_search(query: str) -> str:
         """Search the live web for information not in the company knowledge base."""
-        return (
-            f"STUB: web search for {query!r} — no external MCP server connected yet. "
-            f"(Real live web search lands in M3.)"
-        )
+        return f"STUB: web search for {query!r} — no external MCP server connected."
 
     return [*manager_stub_tools(), web_search]
 
 
-# TODO(M3): concurrent tool execution.
-#   When the model requests several independent tool calls in one turn, run them
-#   with asyncio.gather rather than sequentially. Implement in tiers/base.py
-#   behind a flag so every tier benefits — do not fork the loop here.
-#   Watch out: tool calls with ordering dependencies must not be parallelized.
-#   Simplest safe rule for M3 — parallelize only calls to DIFFERENT tools.
+# Concurrent tool execution: already free, from LangGraph's ToolNode — see the
+# note in tiers/base.py::build_tier for the timing proof.
 
 _ = Tier  # staged for the implementation above

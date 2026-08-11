@@ -89,7 +89,7 @@ class HumanEscalationEvent(BaseModel):
     """
 
     type: Literal["human_escalation"] = "human_escalation"
-    channels: list[str]  # e.g. ["email", "push"]
+    channels: list[str]  # e.g. ["email", "scheduling"]
     scheduling_link: str | None = None
     message: str
     session_continues: bool = True  # always True — kept explicit for the client

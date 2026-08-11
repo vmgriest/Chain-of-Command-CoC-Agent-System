@@ -1,8 +1,14 @@
 # Local dev infrastructure. Backend and frontend run on the host during development.
 #
 # Usage: docker compose up -d
-# TODO(M3): add the sandboxed MCP runner network here — an internal-only bridge
-#           with egress restricted to the endpoints declared in company_config.json.
+#
+# backend/mcp/internal_server.py is NOT declared here — it runs on the host
+# via `uv run python -m backend.mcp.internal_server --port 9001`, same as the
+# main API process, since it's first-party code with the same dependencies.
+# Only the sandboxed MCP runner network is a TODO:
+# TODO(M3+): an internal-only bridge network for backend/mcp/sandbox.py's
+#           spawned containers, with egress restricted to the endpoints
+#           declared in company_config.json (see MCP_SERVER_POLICY.allowed_egress).
 
 services:
   qdrant:

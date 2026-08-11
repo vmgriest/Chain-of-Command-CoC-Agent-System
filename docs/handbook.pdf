@@ -1,0 +1,293 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 4
+/Kids [ 4 0 R 7 0 R 10 0 R 13 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 5 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 6 0 R
+>>
+endobj
+5 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+6 0 obj
+<<
+/Length 992
+>>
+stream
+BT
+/F1 11 Tf
+16 TL
+72 720 Td
+(Acme Robotics -- Support Handbook) Tj
+T*
+() Tj
+T*
+(This handbook is the source of truth for support policy. Front Desk) Tj
+T*
+(associates do not have access to this document; the Support Manager) Tj
+T*
+(tier and above do, via the RAG knowledge base.) Tj
+T*
+() Tj
+T*
+(Section 1: Returns & Refunds) Tj
+T*
+() Tj
+T*
+(- Standard return window: 30 days from the delivery date, for all) Tj
+T*
+(hardware purchased directly from acme.com.) Tj
+T*
+(- Acme Pro subscribers \(see Section on subscriptions\) receive an) Tj
+T*
+(extended 45-day return window on hardware purchases.) Tj
+T*
+(- Returns require an RMA number. Request one by emailing) Tj
+T*
+(returns@acme.com or through the RMA tool at acme.com/returns.) Tj
+T*
+(- Refunds are issued to the original payment method within 5-7) Tj
+T*
+(business days of the warehouse receiving the returned item.) Tj
+T*
+(- Custom-configured RoboArm X9 units are FINAL SALE once assembled) Tj
+T*
+(and are not eligible for return.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 8 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 9 0 R
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+9 0 obj
+<<
+/Length 748
+>>
+stream
+BT
+/F1 11 Tf
+16 TL
+72 720 Td
+(Section 2: Warranty Coverage) Tj
+T*
+() Tj
+T*
+(- All Acme Robotics hardware ships with a 2-year limited warranty) Tj
+T*
+(covering manufacturing defects.) Tj
+T*
+(- The RoboArm X9 and RoboArm X9 Pro extend to a 3-year warranty) Tj
+T*
+(when registered within 30 days of purchase at acme.com/register.) Tj
+T*
+(- Warranty claims require a claim code in the format ARW-#####) Tj
+T*
+(\(five digits\). Claim codes are issued after a diagnostic call) Tj
+T*
+(with support -- customers cannot self-issue one.) Tj
+T*
+(- Water damage, drops, and unauthorized firmware modifications) Tj
+T*
+(void the warranty immediately.) Tj
+T*
+(- Battery packs are covered for 1 year only, regardless of the) Tj
+T*
+(hardware's warranty term.) Tj
+ET
+endstream
+endobj
+10 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 11 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 12 0 R
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+12 0 obj
+<<
+/Length 971
+>>
+stream
+BT
+/F1 11 Tf
+16 TL
+72 720 Td
+(Section 3: Hardware Troubleshooting Codes) Tj
+T*
+() Tj
+T*
+(- Error E-101 \(Motor calibration failure\): hold the RESET button) Tj
+T*
+(for 10 seconds until the LED blinks blue, then re-run calibration) Tj
+T*
+(from the companion app. Front Desk and Manager can both walk a) Tj
+T*
+(customer through this.) Tj
+T*
+(- Error E-204 \(Battery communication fault\): reseat the battery) Tj
+T*
+(pack. If the code persists after 3 attempts, the battery) Tj
+T*
+(requires replacement under warranty.) Tj
+T*
+(- Error E-317 \(Firmware checksum mismatch\): reflash firmware via) Tj
+T*
+(USB-C using the Acme Recovery Tool. Do not attempt this over) Tj
+T*
+(Wi-Fi -- an interrupted OTA update is what causes this error in) Tj
+T*
+(the first place.) Tj
+T*
+(- Error E-450 \(Joint overcurrent protection tripped\): power cycle) Tj
+T*
+(the unit. If it recurs within 24 hours, stop use and contact) Tj
+T*
+(support -- this can indicate a mechanical obstruction.) Tj
+ET
+endstream
+endobj
+13 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 14 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Contents 15 0 R
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+15 0 obj
+<<
+/Length 820
+>>
+stream
+BT
+/F1 11 Tf
+16 TL
+72 720 Td
+(Section 4: When to Escalate) Tj
+T*
+() Tj
+T*
+(- Front Desk associates handle order status, general policy) Tj
+T*
+(questions, and basic troubleshooting \(E-101, E-204\).) Tj
+T*
+(- Support Managers have access to the order and RMA systems and) Tj
+T*
+(additionally handle E-317 and E-450 codes, plus policy) Tj
+T*
+(exceptions up to $200.) Tj
+T*
+(- The VP of Customer Success can authorize policy exceptions) Tj
+T*
+(above $200, coordinate with engineering on recurring hardware) Tj
+T*
+(faults, and search the live web for parts availability and) Tj
+T*
+(compatibility questions.) Tj
+T*
+(- Escalations reaching the CEO's office are reserved for cases) Tj
+T*
+(requiring executive judgment, PR-sensitive situations, or a) Tj
+T*
+(problem that has already failed to resolve at every lower tier.) Tj
+ET
+endstream
+endobj
+xref
+0 16
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000133 00000 n 
+0000000182 00000 n 
+0000000314 00000 n 
+0000000384 00000 n 
+0000001427 00000 n 
+0000001559 00000 n 
+0000001629 00000 n 
+0000002428 00000 n 
+0000002563 00000 n 
+0000002634 00000 n 
+0000003657 00000 n 
+0000003792 00000 n 
+0000003863 00000 n 
+trailer
+<<
+/Size 16
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+4735
+%%EOF

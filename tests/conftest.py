@@ -28,9 +28,13 @@ class _FakeStructuredRunnable:
         self._schema = schema
 
     async def ainvoke(self, *_args, **_kwargs):
+        self._fake_llm.last_ainvoke_args = _args
+        self._fake_llm.last_ainvoke_kwargs = _kwargs
         return self._fake_llm._next_structured(self._schema)
 
     def invoke(self, *_args, **_kwargs):
+        self._fake_llm.last_ainvoke_args = _args
+        self._fake_llm.last_ainvoke_kwargs = _kwargs
         return self._fake_llm._next_structured(self._schema)
 
 
@@ -44,6 +48,13 @@ class FakeLLM:
     def __init__(self) -> None:
         self._text_responses: list = []
         self._structured_responses: dict[type, list] = {}
+        # Set by the most recent ainvoke()/invoke() call on either this
+        # object or a with_structured_output() wrapper of it — lets a test
+        # assert what config (e.g. tags) a caller actually passed through.
+        self.last_ainvoke_kwargs: dict | None = None
+        # Same, but the positional args (e.g. the prompt/messages a caller
+        # built) — lets a test assert on actual prompt CONTENT, not just config.
+        self.last_ainvoke_args: tuple | None = None
 
     def script_text(self, *messages) -> FakeLLM:
         """Queue plain AIMessage responses for .ainvoke()/.astream() (the
@@ -75,6 +86,7 @@ class FakeLLM:
     async def ainvoke(self, *_args, **_kwargs):
         from langchain_core.messages import AIMessage
 
+        self.last_ainvoke_kwargs = _kwargs
         if self._text_responses:
             next_ = self._text_responses.pop(0)
             return next_ if hasattr(next_, "content") else AIMessage(content=str(next_))
@@ -106,6 +118,38 @@ def config(example_config_dict: dict):
 @pytest.fixture
 def fake_llm() -> FakeLLM:
     return FakeLLM()
+
+
+@pytest.fixture(autouse=True)
+def _reset_mcp_registry_singleton():
+    """backend.mcp.registry.set_registry() sets a process-wide singleton, so
+    any test that calls it (directly, or via set_registry(MCPRegistry(...)))
+    would otherwise leak that registry into every later test in the same
+    pytest run — caught live when a test using a fake MultiServerMCPClient
+    (returning plain non-BaseTool objects) leaked into unrelated
+    test_invariants.py tests that build the real graph via build_graph(),
+    crashing on tool conversion. Reset before AND after so a test never reads
+    a stale registry from whatever ran before it either."""
+    from backend.mcp import registry as registry_module
+
+    registry_module._registry = None
+    yield
+    registry_module._registry = None
+
+
+def script_passing_guardrail(fake: FakeLLM) -> None:
+    """Every full-graph turn starting at Front Desk now runs the M5 input
+    guardrail first (backend/graph/supervisor.py::guardrail_input_node). Tests
+    that drive build_graph() end-to-end need a clean InputVerdict scripted, or
+    the FakeLLM has nothing to return for it."""
+    from backend.graph.middleware.guardrails import InputVerdict
+
+    fake.script_structured(
+        InputVerdict,
+        InputVerdict(
+            is_injection=False, contains_pii=False, is_abusive=False, in_scope=True, reason=""
+        ),
+    )
 
 
 @pytest.fixture

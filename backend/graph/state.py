@@ -56,13 +56,29 @@ class CoCState(TypedDict, total=False):
     # --- CEO / human loop (M4) ---
     human_notified: bool  # session stays LIVE after this flips true
 
+    # --- guardrails (M5) ---
+    abuse_count: int  # never resets across the session; repeated abuse escalates the response
+    guardrail_hits: list[str]  # analytics: "injection" | "pii" | "abuse" | "off_scope", accumulates
+
+    # --- analytics (M5) ---
+    started_at: float  # time.time() at session start; duration = now - started_at
+    turn_count: int  # incremented once per user message, in classify_intent
+    user_initiated_escalations: int
+    agent_initiated_escalations: int
+    consent_refusals: int
+    escalation_reasons: list[str]  # every reason a handoff cited, in order
+
     # --- transient, read once by the API layer to emit the matching WS event ---
     _last_tier_change: dict | None
     _last_human_escalation_channels: list[str] | None
+    _guardrail_blocked: (
+        bool  # set each turn by guardrail_input_node; read once by route_from_guardrail
+    )
 
 
 def new_state(session_id: str) -> CoCState:
     """Fresh session: front_desk, attempt_count 0, initial_packet(), no pendings."""
+    import time
     import uuid
 
     from backend.graph.handoff import initial_packet
@@ -81,6 +97,14 @@ def new_state(session_id: str) -> CoCState:
         context_request_count=0,
         escalation_declined=False,
         human_notified=False,
+        abuse_count=0,
+        guardrail_hits=[],
+        started_at=time.time(),
+        turn_count=0,
+        user_initiated_escalations=0,
+        agent_initiated_escalations=0,
+        consent_refusals=0,
+        escalation_reasons=[],
     )
 
 

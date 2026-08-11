@@ -45,11 +45,17 @@ def test_comment_key_is_stripped(tmp_path, example_config_dict: dict) -> None:
 
 
 def test_stdio_requires_command(example_config_dict: dict) -> None:
+    """Self-contained rather than mutating a specific example-config server
+    slot — the example's servers are all http-transport as of the Tavily
+    switch (Brave Search killed its free tier), so there's no longer a stdio
+    entry in it to depend on for this."""
     from backend.config.schema import CompanyConfig
 
     raw = dict(example_config_dict)
     raw.pop("_comment", None)
-    raw["mcp_servers"]["internal"][0].pop("command")
+    raw["mcp_servers"]["external"].append(
+        {"name": "stdio_test", "transport": "stdio", "tiers": ["ceo"]}
+    )
     with pytest.raises(ValidationError):
         CompanyConfig.model_validate(raw)
 
@@ -108,7 +114,7 @@ def test_human_admin_requires_a_channel(example_config_dict: dict) -> None:
 
     raw = dict(example_config_dict)
     raw.pop("_comment", None)
-    raw["escalation"]["human_admin"] = {"email": None, "push_topic": None, "scheduling_link": None}
+    raw["escalation"]["human_admin"] = {"email": None, "scheduling_link": None}
     with pytest.raises(ValidationError):
         CompanyConfig.model_validate(raw)
 
@@ -124,3 +130,51 @@ def test_config_is_cached(tmp_path, example_config_dict: dict, monkeypatch) -> N
     first = loader_module.get_config()
     second = loader_module.get_config()
     assert first is second
+
+
+def test_reload_config_picks_up_content_changes(
+    tmp_path, example_config_dict: dict, monkeypatch
+) -> None:
+    from backend.config import loader as loader_module
+
+    config_path = tmp_path / "company_config.json"
+    config_path.write_text(json.dumps(example_config_dict), encoding="utf-8")
+    monkeypatch.setenv("COMPANY_CONFIG_PATH", str(config_path))
+    loader_module.get_config.cache_clear()
+
+    original = loader_module.get_config()
+    assert original.escalation.max_attempts_per_tier == 3
+
+    edited = dict(example_config_dict)
+    edited.pop("_comment", None)
+    edited["escalation"]["max_attempts_per_tier"] = 7
+    config_path.write_text(json.dumps(edited), encoding="utf-8")
+
+    reloaded = loader_module.reload_config()
+    assert reloaded.escalation.max_attempts_per_tier == 7
+    # The module-level cache picks up the same change on the next access.
+    assert loader_module.get_config().escalation.max_attempts_per_tier == 7
+
+
+def test_reload_config_leaves_previous_config_in_place_on_invalid_edit(
+    tmp_path, example_config_dict: dict, monkeypatch
+) -> None:
+    from backend.config import loader as loader_module
+
+    config_path = tmp_path / "company_config.json"
+    config_path.write_text(json.dumps(example_config_dict), encoding="utf-8")
+    monkeypatch.setenv("COMPANY_CONFIG_PATH", str(config_path))
+    loader_module.get_config.cache_clear()
+
+    good = loader_module.get_config()
+
+    broken = dict(example_config_dict)
+    broken.pop("_comment", None)
+    del broken["personas"]
+    config_path.write_text(json.dumps(broken), encoding="utf-8")
+
+    with pytest.raises(loader_module.ConfigError):
+        loader_module.reload_config()
+
+    # The bad edit must not have torn down the previously-cached good config.
+    assert loader_module.get_config() is good

@@ -251,9 +251,10 @@ async def test_resume_after_interrupt(monkeypatch) -> None:
     from backend.graph.state import new_state
     from backend.graph.supervisor import UserIntent
     from backend.graph.tiers.base import TierVerdict
-    from tests.conftest import FakeLLM
+    from tests.conftest import FakeLLM, script_passing_guardrail
 
     fake = FakeLLM()
+    script_passing_guardrail(fake)
     fake.script_structured(UserIntent, UserIntent(wants_escalation=False, is_simple_question=False))
     fake.script_text(AIMessage(content="I'd need your account number for that."))
     fake.script_structured(

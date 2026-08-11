@@ -65,8 +65,16 @@ class CompanyInfo(BaseModel):
     website: HttpUrl
     support_scope: list[str] = Field(default_factory=list)
 
-    # TODO(M2): validator — `domain` must be bare (no scheme, no path).
-    #   It is the allowlist root for scrape_url().
+    @field_validator("domain")
+    @classmethod
+    def _domain_is_bare(cls, v: str) -> str:
+        """`domain` is the allowlist root for scrape_url() and the crawler — it
+        must be a bare hostname, not a URL, or a naive `netloc == domain` check
+        elsewhere would never match."""
+        if v != v.strip() or "://" in v or "/" in v or v == "":
+            msg = f"company.domain must be a bare hostname (e.g. 'acme.com'), got {v!r}"
+            raise ValueError(msg)
+        return v
 
 
 class Persona(BaseModel):
@@ -126,7 +134,10 @@ class KnowledgeConfig(BaseModel):
     crawl_urls: list[HttpUrl] = Field(default_factory=list)
     qdrant_collection: str
 
-    # TODO(M2): validator — every path in `documents` exists and is readable.
+    # Missing document paths are a WARNING, not a load-time failure — see
+    # backend/config/loader.py::startup_checks. A company config authored before
+    # the docs are dropped in place should still boot; ingest.py's load_path()
+    # also warns and skips rather than raising, for the same reason.
 
 
 class MCPServerConfig(BaseModel):
@@ -146,6 +157,24 @@ class MCPServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     url: HttpUrl | None = None
     tiers: list[Tier]
+
+    # Environment variables passed to a spawned stdio server (e.g. an API key
+    # a third-party MCP server needs). Values support `${VAR_NAME}` to
+    # reference the HOST's actual environment (see .env / .env.example) — a
+    # real secret should never sit in company_config.json directly, same
+    # reasoning SMTP_PASSWORD etc. live in .env and not here. Resolved at
+    # spawn time in backend/mcp/sandbox.py; a reference to an unset host var
+    # warns and is dropped rather than failing startup — that server just
+    # won't authenticate, same as any other single-server failure this app
+    # tolerates.
+    env: dict[str, str] = Field(default_factory=dict)
+
+    # HTTP headers sent to an http-transport server (e.g. an auth header, or
+    # Tavily's keyless-access header). Same `${VAR_NAME}` host-environment
+    # resolution as `env` above, and resolved the same way
+    # (backend/mcp/sandbox.resolve_env — the function isn't stdio-specific
+    # despite its module, it's just "expand ${VAR} against os.environ").
+    headers: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("command")
     @classmethod
@@ -216,14 +245,13 @@ class HumanAdmin(BaseModel):
     or CEO escalation has nowhere to go."""
 
     email: str | None = None
-    push_topic: str | None = None
     scheduling_link: HttpUrl | None = None
 
     @model_validator(mode="after")
     def _at_least_one_channel(self) -> HumanAdmin:
-        if self.email is None and self.push_topic is None and self.scheduling_link is None:
+        if self.email is None and self.scheduling_link is None:
             msg = (
-                "human_admin needs at least one channel (email, push_topic, or "
+                "human_admin needs at least one channel (email or "
                 "scheduling_link) — CEO escalation would otherwise have nowhere to go"
             )
             raise ValueError(msg)

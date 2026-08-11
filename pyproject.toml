@@ -28,7 +28,6 @@ dependencies = [
     "mcp>=1.0.0",
     # --- notifications (M4) ---
     "aiosmtplib>=3.0.0",
-    "pywebpush>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -56,7 +55,11 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
 ignore = ["S101"]
 
 [tool.mypy]
-python_version = "3.11"
+# Matches the interpreter `uv` actually pins (.venv is cpython-3.12) rather
+# than the >=3.11 floor in [project] — qdrant-client (M2) pulls in numpy as a
+# transitive dependency, and numpy's shipped stubs use PEP 695 `type X = ...`
+# syntax that only parses under 3.12+.
+python_version = "3.12"
 strict = true
 warn_return_any = true
 # TODO(M1): drop this once the third-party stubs situation settles.

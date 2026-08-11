@@ -26,6 +26,7 @@ frontend/.vite/
 qdrant_storage/
 ollama_data/
 *.log
+.analytics.json
 
 # --- editors / os ---
 .vscode/

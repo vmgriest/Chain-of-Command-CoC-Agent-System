@@ -104,6 +104,7 @@ async def classify_intent(state: CoCState) -> dict:
     updates: dict = {
         # per-turn HITL bookkeeping resets with every new user message
         "context_request_count": 0,
+        "turn_count": state.get("turn_count", 0) + 1,
     }
 
     if intent.wants_escalation:
@@ -145,14 +146,14 @@ def route_from_classification(state: CoCState) -> str:
 def route_from_tier(state: CoCState) -> str:
     """Decide what happens after a tier finishes its loop.
 
-      - pending_context_question set        -> "context_request" (HITL)
-      - pending_escalation and at CEO       -> "human"
-      - pending_escalation, consent needed  -> "consent"
-      - pending_escalation, consent waived  -> "handoff"
-      - attempt_count >= max_attempts       -> force straight to handoff/human,
-        skipping consent — repeatedly asking "are you sure?" IS the failure mode
-        max_attempts exists to stop.
-      - otherwise                           -> END (reply to the user)
+    - pending_context_question set        -> "context_request" (HITL)
+    - pending_escalation and at CEO       -> "human"
+    - pending_escalation, consent needed  -> "consent"
+    - pending_escalation, consent waived  -> "handoff"
+    - attempt_count >= max_attempts       -> force straight to handoff/human,
+      skipping consent — repeatedly asking "are you sure?" IS the failure mode
+      max_attempts exists to stop.
+    - otherwise                           -> END (reply to the user)
     """
     from backend.config.loader import get_config
 
@@ -201,27 +202,99 @@ async def context_request_node(state: CoCState) -> dict:
     return await request_context(state, question)
 
 
+async def guardrail_input_node(state: CoCState) -> dict:
+    """Screen the latest customer message — Front Desk only (see the module
+    docstring in backend/graph/middleware/guardrails.py for why). A no-op at
+    every other tier: everything above Front Desk works from a HandoffPacket,
+    not raw customer input, at the moment a handoff happens, but the customer
+    keeps typing directly to whichever tier is current after that — this node
+    still runs every turn, it just only takes action when current_tier is
+    FRONT_DESK.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from backend.config.loader import get_config
+    from backend.graph.handoff import redact
+    from backend.graph.middleware.guardrails import (
+        MAX_ABUSE_WARNINGS,
+        check_input,
+        last_human_message,
+    )
+
+    if state["current_tier"] != Tier.FRONT_DESK:
+        return {"_guardrail_blocked": False}
+
+    verdict = await check_input(state)
+    hits = [
+        *state.get("guardrail_hits", []),
+        *(["injection"] if verdict.is_injection else []),
+        *(["pii"] if verdict.contains_pii else []),
+        *(["abuse"] if verdict.is_abusive else []),
+        *(["off_scope"] if not verdict.in_scope else []),
+    ]
+    updates: dict = {"guardrail_hits": hits} if hits != state.get("guardrail_hits", []) else {}
+
+    if verdict.contains_pii:
+        last_human = last_human_message(state["messages"])
+        if last_human is not None:
+            redacted_text, was_redacted = redact(str(last_human.content))
+            if was_redacted:
+                updates["messages"] = [HumanMessage(content=redacted_text, id=last_human.id)]
+
+    if verdict.is_abusive:
+        abuse_count = state.get("abuse_count", 0) + 1
+        updates["abuse_count"] = abuse_count
+        text = (
+            "I need to pause here — repeated abusive language means I can't keep "
+            "this conversation going right now. Please reach back out when we can "
+            "keep this respectful."
+            if abuse_count >= MAX_ABUSE_WARNINGS
+            else "I'm glad to help, but I'll need us to keep this respectful. "
+            "What can I help you with?"
+        )
+        updates["messages"] = [*updates.get("messages", []), AIMessage(content=text)]
+        updates["_guardrail_blocked"] = True
+        return updates
+
+    if not verdict.in_scope:
+        support_scope = ", ".join(get_config().company.support_scope) or "general support"
+        text = (
+            f"That's outside what I can help with here — we handle {support_scope}. "
+            f"Is there something in that area I can help with?"
+        )
+        updates["messages"] = [*updates.get("messages", []), AIMessage(content=text)]
+        updates["_guardrail_blocked"] = True
+        return updates
+
+    updates["_guardrail_blocked"] = False
+    return updates
+
+
+def route_from_guardrail(state: CoCState) -> str:
+    return "blocked" if state.get("_guardrail_blocked") else "continue"
+
+
 async def human_escalation_node(state: CoCState) -> dict:
-    """CEO-tier human escalation. Full notification channels (email/push/
-    scheduling) land in M4 — backend/notifications/. This M1 version records the
-    escalation and keeps the session live, satisfying the invariant that a
-    human hop never ends the conversation.
+    """CEO's own TierVerdict gave up (can_resolve=False, already at CEO).
+    Fans out to real notification channels (backend/notifications/) and keeps
+    the session live — a human hop never ends the conversation.
+
+    This is the AUTOMATIC path. The CEO can also escalate PROACTIVELY mid-turn
+    via its own `escalate_to_human` tool (backend/graph/tiers/ceo.py), which
+    updates the same `human_notified` / `_last_human_escalation_channels`
+    state fields via a returned Command — backend/api/main.py detects either
+    path identically, by diffing `human_notified` across the turn, not by node
+    name.
     """
     from langchain_core.messages import AIMessage
 
-    from backend.config.loader import get_config
+    from backend.notifications import notify_human, session_url
 
-    config = get_config()
-    admin = config.escalation.human_admin
-    channels = [
-        c
-        for c, present in (
-            ("email", admin.email),
-            ("push", admin.push_topic),
-            ("scheduling", admin.scheduling_link),
-        )
-        if present
-    ]
+    packet = state["packet"]
+    reason = packet.escalation_reason or "unable to resolve at any tier"
+    url = session_url(state["session_id"])
+    channels = await notify_human(packet, reason, urgency="normal", session_url_=url)
+
     text = (
         "I've exhausted what I can do from here, so I've flagged this for a "
         "member of our team to follow up personally. In the meantime, I'm still "
@@ -306,6 +379,13 @@ async def do_handoff(state: CoCState) -> dict:
         "reason": reason,
         "packet_summary": _summarize_packet_for_ui(new_packet),
     }
+    counter_key = (
+        "user_initiated_escalations"
+        if pending.get("user_initiated")
+        else "agent_initiated_escalations"
+    )
+    updates[counter_key] = state.get(counter_key, 0) + 1
+    updates["escalation_reasons"] = [*state.get("escalation_reasons", []), reason]
     return updates
 
 
@@ -313,6 +393,7 @@ def build_graph() -> CompiledStateGraph:
     """Assemble the parent graph.
 
     Nodes:
+      guardrail_input — input screening, Front Desk only (no-op elsewhere)
       classify   — UserIntent on each user turn
       front_desk / manager / vice_president / ceo  — the four subgraphs
       consent    — HITL interrupt for agent-initiated escalation
@@ -321,8 +402,8 @@ def build_graph() -> CompiledStateGraph:
       human      — CEO-tier human escalation; returns to the CEO, not END
 
     Compiled with MemorySaver for dev.
-    TODO(M5): Postgres checkpointer for anything real — MemorySaver loses every
-      conversation on restart, including sessions paused at an interrupt.
+    TODO(M5+): Postgres checkpointer for anything real — MemorySaver loses
+      every conversation on restart, including sessions paused at an interrupt.
     """
     from langgraph.checkpoint.memory import MemorySaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -337,6 +418,7 @@ def build_graph() -> CompiledStateGraph:
     config = get_config()
 
     graph = StateGraph(CoCState)
+    graph.add_node("guardrail_input", guardrail_input_node)
     graph.add_node("classify", classify_intent)
     graph.add_node(Tier.FRONT_DESK.value, front_desk_tier.build(config.models.front_desk))
     graph.add_node(Tier.MANAGER.value, manager_tier.build(config.models.manager))
@@ -351,7 +433,10 @@ def build_graph() -> CompiledStateGraph:
     graph.add_node("introduce", announce_new_tier)
     graph.add_node("human", human_escalation_node)
 
-    graph.set_entry_point("classify")
+    graph.set_entry_point("guardrail_input")
+    graph.add_conditional_edges(
+        "guardrail_input", route_from_guardrail, {"blocked": END, "continue": "classify"}
+    )
 
     tier_map = {t.value: t.value for t in ORDER}
     graph.add_conditional_edges(

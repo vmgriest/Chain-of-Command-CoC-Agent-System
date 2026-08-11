@@ -155,8 +155,8 @@ def test_config_rejects_disallowed_binary(example_config_dict: dict) -> None:
 
     raw = dict(example_config_dict)
     raw.pop("_comment", None)
-    raw["mcp_servers"]["internal"][0]["command"] = "bash"
-    with pytest.raises(ValidationError):
+    raw["mcp_servers"]["external"][0]["command"] = "bash"  # web_search: stdio, npx
+    with pytest.raises(ValidationError, match="allowlist"):
         CompanyConfig.model_validate(raw)
 
 
@@ -174,9 +174,10 @@ async def test_no_interrupt_when_no_context_needed(monkeypatch) -> None:
     from backend.graph.state import new_state
     from backend.graph.supervisor import UserIntent
     from backend.graph.tiers.base import TierVerdict
-    from tests.conftest import FakeLLM
+    from tests.conftest import FakeLLM, script_passing_guardrail
 
     fake = FakeLLM()
+    script_passing_guardrail(fake)
     fake.script_structured(UserIntent, UserIntent(wants_escalation=False, is_simple_question=True))
     fake.script_text(AIMessage(content="Our hours are 9-5 Monday to Friday."))
     fake.script_structured(
@@ -210,12 +211,11 @@ async def test_user_initiated_escalation_skips_consent(monkeypatch) -> None:
     from backend.config.schema import Tier
     from backend.graph.state import new_state
     from backend.graph.supervisor import UserIntent
-    from tests.conftest import FakeLLM
+    from tests.conftest import FakeLLM, script_passing_guardrail
 
     fake = FakeLLM()
-    fake.script_structured(
-        UserIntent, UserIntent(wants_escalation=True, is_simple_question=False)
-    )
+    script_passing_guardrail(fake)
+    fake.script_structured(UserIntent, UserIntent(wants_escalation=True, is_simple_question=False))
 
     monkeypatch.setattr("backend.graph.tiers.base.make_model", lambda *a, **kw: fake)
     monkeypatch.setattr(
