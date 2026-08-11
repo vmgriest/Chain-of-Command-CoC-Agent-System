@@ -63,6 +63,11 @@ export function AgentHeader({
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Four small dots, one per tier — filled up to the current position,
+            hollow beyond it. A compact "how far up the ladder are we" readout
+            that doesn't require reading the tier badge text. aria-hidden
+            because the badge text below already conveys the same information
+            to a screen reader. */}
         <div className="hidden items-center gap-1 sm:flex" aria-hidden="true">
           {TIER_ORDER.map((tier, i) => (
             <span

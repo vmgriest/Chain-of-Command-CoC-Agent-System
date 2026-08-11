@@ -4,6 +4,12 @@
 
 import type { PublicConfig } from '@/types';
 
+// import.meta.env is Vite's env-var mechanism (not process.env — this runs in
+// the browser, not Node). Empty string by default: fetch('' + '/api/config')
+// is just '/api/config', a same-origin request that Vite's dev-server proxy
+// (vite.config.ts) forwards to the real backend — no CORS to configure.
+// Set VITE_API_BASE only when the frontend is served from a different origin
+// than the backend (e.g. separate production domains).
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 /** GET /api/config — personas and themes, fetched once at app mount. */

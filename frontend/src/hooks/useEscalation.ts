@@ -44,6 +44,10 @@ export function useEscalation(send: (event: ClientEvent) => void): {
   const currentTier = useChatStore((s) => s.currentTier);
   const clearPendingEscalation = useChatStore((s) => s.clearPendingEscalation);
   const [transitioning, setTransitioning] = useState(false);
+  // useRef, not useState, for these two: changing them must NOT trigger a
+  // re-render (they're bookkeeping for the effect below, not something drawn
+  // on screen), and a ref's value survives across renders without resetting,
+  // unlike a plain local variable would.
   const previousTierRef = useRef(currentTier);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

@@ -48,10 +48,16 @@ MAX_PACKET_TOKENS = 800
 # Order matters: card (long digit runs) before phone (shorter digit runs) so a
 # 16-digit card number isn't partially eaten by the phone pattern first.
 PII_PATTERNS: dict[str, re.Pattern[str]] = {
-    "email": re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}"),
+    "email": re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}"),  # local@domain.tld
+    # 13-19 total digits (grouped in runs of up to 4, with optional spaces/dashes
+    # between groups), covers most real card lengths (Visa 16, Amex 15, etc.).
+    # (?<!\d) / (?!\d) are "not preceded/followed by a digit" — without them this
+    # would also match the middle of a longer, unrelated number.
     "card": re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)"),
+    # Optional +1 country code, optional parens around the area code, then
+    # XXX-XXX-XXXX with '-', '.', or a space as the separator.
     "phone": re.compile(r"(?<!\d)(?:\+?1[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)"),
-    "ssn": re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"),
+    "ssn": re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"),  # XXX-XX-XXXX only (no bare-digit SSNs)
 }
 
 

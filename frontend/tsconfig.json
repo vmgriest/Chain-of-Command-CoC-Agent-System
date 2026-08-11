@@ -1,22 +1,58 @@
 {
+  // tsconfig.json supports "JSONC" (JSON with Comments) — TypeScript's own
+  // parser strips these before reading the file, so this is valid even
+  // though plain JSON has no comment syntax.
   "compilerOptions": {
+    // Compile down to ES2022 syntax — modern browsers only, no legacy
+    // transpilation needed since this is a dev/demo app, not a public site.
     "target": "ES2022",
+    // Type definitions available to the compiler: ES2022 builtins (Promise,
+    // Array methods, ...) plus DOM APIs (window, document, WebSocket, ...)
+    // and DOM.Iterable (so `for..of` works over NodeList etc.).
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Emit ES module syntax (import/export) rather than CommonJS (require).
     "module": "ESNext",
+    // How TS resolves `import` paths — "bundler" matches how Vite itself
+    // resolves modules (package "exports" fields, no forced file extensions).
     "moduleResolution": "bundler",
+    // Compile JSX using the React 17+ automatic runtime — no need to
+    // `import React from 'react'` in every .tsx file just to use JSX.
     "jsx": "react-jsx",
+    // Turns on the full set of strict type-checking flags (strictNullChecks,
+    // noImplicitAny, etc.) — the strongest safety net TS offers.
     "strict": true,
+    // Error on variables/imports that are declared but never read — catches
+    // dead code and leftover debugging imports.
     "noUnusedLocals": true,
+    // Same, but for unused function parameters.
     "noUnusedParameters": true,
+    // Error if a `switch` case can fall through to the next one without an
+    // explicit `break`/`return` — a common source of silent bugs.
     "noFallthroughCasesInSwitch": true,
+    // Allow `import data from './file.json'` with proper typing.
     "resolveJsonModule": true,
+    // Require every file to be safely transpilable in isolation (no relying
+    // on whole-program type info at emit time) — this is what lets Vite
+    // (via esbuild) compile files one at a time instead of type-checking
+    // the whole project before serving.
     "isolatedModules": true,
+    // TypeScript only type-checks here; it never writes .js output itself —
+    // Vite/esbuild does the actual transpilation and bundling.
     "noEmit": true,
+    // Don't type-check .d.ts files inside node_modules — third-party
+    // library types are trusted as-is, which keeps builds fast.
     "skipLibCheck": true,
+    // Root directory that relative module paths below are resolved against.
     "baseUrl": ".",
+    // Path alias: `import { x } from '@/store/chat'` resolves to
+    // `src/store/chat.ts` instead of a relative `../../store/chat`. Vite's
+    // own config (vite.config.ts) must define the same alias for this to
+    // work at runtime, not just at type-check time.
     "paths": {
       "@/*": ["./src/*"]
     }
   },
+  // Only type-check files under src/ — nothing outside the app source
+  // (config files, build output, etc.) is included in this project.
   "include": ["src"]
 }

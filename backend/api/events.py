@@ -148,6 +148,11 @@ ServerEvent = (
     | TurnEndEvent
 )
 
+# Field(discriminator="type") is Pydantic's "tagged union": instead of trying
+# each of the three models in order and seeing which one happens to validate,
+# it reads the payload's "type" field first and jumps straight to the matching
+# model — faster, and gives a precise error instead of a confusing one from
+# whichever model was tried last.
 ClientEvent = Annotated[
     UserMessage | EscalationResponse | ContextResponse,
     Field(discriminator="type"),

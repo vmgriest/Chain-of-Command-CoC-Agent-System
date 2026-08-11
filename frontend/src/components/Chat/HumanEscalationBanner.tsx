@@ -58,6 +58,10 @@ export function HumanEscalationBanner({
         <a
           href={schedulingLink}
           target="_blank"
+          // rel="noreferrer": opening an external site (e.g. Cal.com) in a new
+          // tab must not leak this page's URL via the Referer header, and
+          // must not give that page a `window.opener` handle back into this
+          // one (the classic tab-nabbing risk of target="_blank" alone).
           rel="noreferrer"
           className="theme-accent mt-2 inline-block text-sm underline"
         >

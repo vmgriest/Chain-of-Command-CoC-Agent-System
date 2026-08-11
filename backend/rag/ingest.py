@@ -203,6 +203,11 @@ async def crawl(urls: list[str], allowed_domain: str | set[str]) -> list[Chunk]:
 
     allowed = {allowed_domain} if isinstance(allowed_domain, str) else set(allowed_domain)
     seen: set[str] = set()
+    # Each queue entry is (url, depth-from-a-seed-url). Popping from the FRONT
+    # (queue.pop(0) below) makes this breadth-first: every page at depth N is
+    # visited before any page at depth N+1, so CRAWL_DEPTH_LIMIT cuts off
+    # cleanly by "hops from a seed" rather than by how deep one link chain
+    # happened to go first.
     queue: list[tuple[str, int]] = [(u, 0) for u in urls]
     chunks: list[Chunk] = []
 

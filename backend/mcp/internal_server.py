@@ -29,7 +29,13 @@ from mcp.server.fastmcp import FastMCP
 
 from backend.graph.tiers.manager import rag_search_impl, run_code_impl, scrape_url_impl
 
-server = FastMCP("coc-internal")
+server = FastMCP("coc-internal")  # "coc-internal" is this MCP server's protocol-level name
+
+
+# @server.tool() registers the decorated function as an MCP tool: FastMCP
+# reads its signature and docstring to build the tool's schema/description
+# automatically, then exposes it to any MCP client that connects (here,
+# langchain_mcp_adapters, via backend/mcp/registry.py).
 
 
 # --- tools ------------------------------------------------------------------

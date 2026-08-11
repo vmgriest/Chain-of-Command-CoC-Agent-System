@@ -1,70 +1,99 @@
+# Project metadata + dependency list, read by `uv` (and any standard Python
+# packaging tool) to build the virtualenv in .venv/. Run `uv sync` to install
+# everything below.
 [project]
 name = "chain-of-command"
 version = "0.1.0"
 description = "Four-tier escalating support agent system built on LangGraph"
 requires-python = ">=3.11"
 
-# NOTE: nothing is installed yet. Run `uv sync` when ready to start M1.
+# Every package the app needs at runtime. Grouped by which part of the system
+# uses them (not by build milestone — the whole system is built, so all of
+# these are live dependencies, not aspirational ones).
 dependencies = [
-    # --- orchestration (M1) ---
-    "langgraph>=0.2.0",
-    "langchain>=0.3.0",
-    "langchain-core>=0.3.0",
-    "langchain-ollama>=0.2.0",
-    # --- api (M1) ---
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "websockets>=13.0",
-    "pydantic>=2.9.0",
-    "python-dotenv>=1.0.0",
-    # --- rag (M2) ---
-    "qdrant-client>=1.12.0",
-    "langchain-text-splitters>=0.3.0",
-    "pypdf>=5.0.0",
-    "beautifulsoup4>=4.12.0",
-    "httpx>=0.27.0",
-    # --- mcp (M3) ---
-    "langchain-mcp-adapters>=0.1.0",
-    "mcp>=1.0.0",
-    # --- notifications (M4) ---
-    "aiosmtplib>=3.0.0",
+    # --- orchestration ---
+    "langgraph>=0.2.0",       # the state-machine/graph engine running the 4 tiers
+    "langchain>=0.3.0",       # agent/tool abstractions LangGraph is built on
+    "langchain-core>=0.3.0",  # messages, runnables, and other shared LangChain types
+    "langchain-ollama>=0.2.0",# ChatOllama — the LangChain wrapper around local Ollama models
+    # --- api ---
+    "fastapi>=0.115.0",       # the HTTP + WebSocket server (backend/api/main.py)
+    "uvicorn[standard]>=0.32.0", # ASGI server that actually runs FastAPI
+    "websockets>=13.0",       # WebSocket protocol implementation uvicorn/FastAPI use
+    "pydantic>=2.9.0",        # schema validation — company_config.json, all structured LLM output
+    "python-dotenv>=1.0.0",   # loads secrets (API keys, SMTP creds) from a local .env file
+    # --- rag ---
+    "qdrant-client>=1.12.0",       # vector database client (backend/rag)
+    "langchain-text-splitters>=0.3.0", # chunks documents before embedding
+    "pypdf>=5.0.0",                # reads text out of PDF handbooks/policies
+    "beautifulsoup4>=4.12.0",      # HTML parsing for the web-crawl ingestion path
+    "httpx>=0.27.0",               # async HTTP client (crawling, scrape_url tool)
+    # --- mcp (Model Context Protocol tool servers) ---
+    "langchain-mcp-adapters>=0.1.0", # turns MCP tool servers into LangChain tools
+    "mcp>=1.0.0",                    # the MCP protocol implementation itself
+    # --- notifications ---
+    "aiosmtplib>=3.0.0",  # async SMTP client for CEO-tier human-escalation emails
 ]
 
+# Installed only with `uv sync --extra dev` — not needed to run the app,
+# only to develop/test it.
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.7.0",
-    "mypy>=1.13.0",
+    "pytest>=8.3.0",          # test runner
+    "pytest-asyncio>=0.24.0", # lets pytest run `async def test_...` functions
+    "ruff>=0.7.0",            # linter + formatter (replaces flake8/black/isort)
+    "mypy>=1.13.0",           # static type checker
 ]
 
+# Standard Python packaging backend config — how `pip install .`/`uv build`
+# would turn this directory into an installable wheel.
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
+# Only backend/ is packaged as an importable module — frontend/, tests/, and
+# docs/ are not part of the distributable wheel.
 packages = ["backend"]
 
+# ruff = lint rules + auto-formatter, configured here instead of a separate
+# .ruff.toml.
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
+# Rule sets enabled: E/F = pyflakes/pycodestyle core errors, I = import
+# sorting, UP = "upgrade to modern syntax" (pyupgrade), B = bugbear (common
+# footguns), ASYNC = async-specific mistakes (e.g. blocking calls in async
+# code), S = bandit security checks.
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
-# S101: asserts are fine in tests. TODO(M5): tighten once the suite is real.
+# S101 (assert statements) is disabled globally because pytest's own asserts
+# would otherwise trip this security rule — asserts are the normal, intended
+# way to fail a test.
 ignore = ["S101"]
 
 [tool.mypy]
 # Matches the interpreter `uv` actually pins (.venv is cpython-3.12) rather
-# than the >=3.11 floor in [project] — qdrant-client (M2) pulls in numpy as a
+# than the >=3.11 floor in [project] — qdrant-client pulls in numpy as a
 # transitive dependency, and numpy's shipped stubs use PEP 695 `type X = ...`
 # syntax that only parses under 3.12+.
 python_version = "3.12"
+# Enables the full strict-mode flag bundle (no implicit Any, no untyped
+# defs, etc.) — the strongest type-checking mypy offers.
 strict = true
+# Flag any function whose inferred return type is `Any` — usually a sign a
+# third-party call wasn't typed and the "Any" is silently spreading.
 warn_return_any = true
-# TODO(M1): drop this once the third-party stubs situation settles.
+# Third-party packages here don't all ship type stubs; without this, mypy
+# would hard-error on every untyped import instead of just skipping it.
 ignore_missing_imports = true
 
+# pytest configuration, read automatically from this file instead of a
+# separate pytest.ini.
 [tool.pytest.ini_options]
+# Treats every `async def test_...` as an async test automatically — no need
+# to mark each one with @pytest.mark.asyncio individually.
 asyncio_mode = "auto"
+# Only look for tests under tests/ (not frontend/, not backend/ itself).
 testpaths = ["tests"]

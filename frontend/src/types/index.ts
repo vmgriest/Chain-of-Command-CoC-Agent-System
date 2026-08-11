@@ -78,6 +78,11 @@ export interface TurnEndEvent {
   type: 'turn_end';
 }
 
+// A "discriminated union": every member has a `type` field with a distinct
+// literal value. TypeScript narrows automatically from a `switch (event.type)`
+// or `if (event.type === 'token')` — no separate tagged-union helper needed,
+// unlike the Pydantic side (backend/api/events.py), which does need one to
+// validate raw JSON into the right model.
 export type ServerEvent =
   | TokenEvent
   | AgentIntroEvent

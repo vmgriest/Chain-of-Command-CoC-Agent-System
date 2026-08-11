@@ -2,8 +2,7 @@
 
 Real sends (SMTP) are a network boundary and are faked here, same convention
 as the RAG/MCP test suites. notify_human's channel-selection logic against a
-real (unconfigured) SMTP setup was additionally live-verified by hand — see
-CHECKLIST.md.
+real SMTP sandbox (Mailtrap) was additionally live-verified by hand.
 """
 
 from __future__ import annotations

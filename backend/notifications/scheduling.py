@@ -29,6 +29,10 @@ def build_scheduling_offer(
     ignore it entirely and keep chatting with the CEO. That path is untouched
     by this function; it only builds a payload, never advances the graph.
     """
+    # urlparse/parse_qsl/urlencode/urlunparse is the standard-library round trip
+    # for "take a URL, add one query param, put it back together" without
+    # clobbering any query params the link already had (e.g. Cal.com's own
+    # ?duration= or ?month= params).
     parsed = urlparse(scheduling_link)
     query = [*parse_qsl(parsed.query), ("ticket_id", packet.ticket_id)]
     link_with_ticket = urlunparse(parsed._replace(query=urlencode(query)))
@@ -41,5 +45,8 @@ def build_scheduling_offer(
     }
 
 
-# TODO(M5 / optional): real calendar integration (Cal.com, Google Calendar) to
-#   show actual availability instead of a bare link. Only worth it if someone asks.
+# Deliberately just a real, clickable booking link (e.g. a Cal.com URL from
+# company_config.json's human_admin.scheduling_link) rather than a live
+# calendar-availability widget — a real calendar integration (showing actual
+# open slots inline) would be the natural next step if this needed to feel
+# more custom, but wasn't asked for.

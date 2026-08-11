@@ -359,19 +359,22 @@ chain-of-command/
 
 ## Getting started
 
-> **Status:** M0–M5 are all built (see [CHECKLIST.md](CHECKLIST.md) for exact
-> per-item status, including what's live-verified vs. implemented-but-not-yet-
-> demoed). Steps below are the real setup, not aspirational.
+> **Status:** M0–M5 are all built and live-verified against real Ollama
+> models, Qdrant, Docker, and third-party integrations (Mailtrap for email,
+> Tavily for web search, Cal.com for scheduling). Steps below are the real
+> setup, not aspirational.
 
 **Prerequisites:** Docker & Docker Compose · Python 3.12 · Node 20+ · [Ollama](https://ollama.com) · [uv](https://docs.astral.sh/uv/)
 
 ```bash
 git clone <repo-url> && cd chain-of-command
 
-# 1. Pull the models named in company_config.json (adjust to what you have —
-#    see CHECKLIST.md for the mapping this repo was actually developed against)
+# 1. Pull the models named in company_config.json. Tool-calling tiers
+#    (manager, vice_president, ceo) need a model with Ollama "tools"
+#    capability — check with `ollama show <model>` and look for "tools"
+#    under Capabilities before mapping it to one of those tiers. Front Desk
+#    never calls tools, so any size works there.
 ollama pull llama3.2
-ollama pull llama3:8b
 ollama pull nomic-embed-text
 
 # 2. Start Qdrant
@@ -418,11 +421,20 @@ succeed before you rely on either.
 - [x] `company_config.json` schema validation and hot reload
 - [x] Escalation-rate and resolution-per-tier analytics
 
-All five milestones from [PLAN.md](PLAN.md) are built. What's still open:
-hybrid (dense+sparse) retrieval, concurrent tool fan-out at the VP tier,
-per-span trace attribute enrichment beyond LangSmith's auto-instrumentation,
-a frontend analytics view (the data's at `GET /api/analytics`, no UI yet),
-and the items in PLAN.md's "Open items" section (auth, a persistent
-checkpointer, multi-tenant deployment) — none of which have been started.
-See [CHECKLIST.md](CHECKLIST.md) for exact status per item, including what's
-live-verified vs. implemented-but-not-yet-demoed.
+All five build milestones — vertical slice, RAG + local tools, MCP + the
+security sandbox, the CEO evaluator-optimizer loop, and guardrails/observability
+— are built and live-verified against real Ollama models, Qdrant, Docker, and
+third-party integrations (Mailtrap, Tavily, Cal.com).
+
+**Still open:**
+
+- Hybrid (dense+sparse) retrieval
+- Per-span trace attribute enrichment beyond LangSmith's auto-instrumentation
+- A frontend analytics view (the data's at `GET /api/analytics`, no UI yet)
+- Auth on the chat session (currently anonymous) — needed before any real deployment
+- A persistent checkpointer (e.g. Postgres) + conversation state beyond process lifetime
+- Multi-tenant deployment — one instance serving several `company_config.json` files, vs. one per company
+
+None of the six above have been started. Concurrent tool fan-out at the VP
+tier, by contrast, needed no dedicated work: LangGraph's `ToolNode` already
+runs every independent tool call in a turn through `asyncio.gather`.

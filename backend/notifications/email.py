@@ -99,7 +99,8 @@ async def send_escalation_email(
             port=int(os.environ.get("SMTP_PORT", "587")),
             username=os.environ.get("SMTP_USER"),
             password=os.environ.get("SMTP_PASSWORD"),
-            start_tls=True,
+            start_tls=True,  # upgrade the plain connection to TLS before sending
+            # credentials/content — matches port 587 (submission), not 465 (implicit TLS)
         )
     except Exception:
         logger.exception("Failed to send escalation email for ticket %s", packet.ticket_id)

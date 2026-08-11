@@ -1,8 +1,7 @@
 # Architecture Notes
 
 Design rationale that does not belong in code comments. See [README.md](../README.md)
-for what the system is, [PLAN.md](../PLAN.md) for the build order, and
-[CHECKLIST.md](../CHECKLIST.md) for tasks.
+for what the system is.
 
 ---
 

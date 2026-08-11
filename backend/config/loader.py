@@ -79,7 +79,8 @@ def load_config(path: Path | None = None) -> CompanyConfig:
         raise ConfigError("\n".join(lines)) from exc
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=1)  # maxsize=1: this is a "call it once, remember forever" cache,
+# not a real LRU — there's only ever one config, so there's nothing to evict.
 def get_config() -> CompanyConfig:
     """Cached accessor used everywhere else in the codebase."""
     return load_config()

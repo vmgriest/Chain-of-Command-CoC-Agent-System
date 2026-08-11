@@ -60,10 +60,10 @@ class CompanyInfo(BaseModel):
     """Identity and support boundaries. `support_scope` feeds the Front Desk
     input guardrail — off-topic questions get declined rather than escalated."""
 
-    name: str
-    domain: str
-    website: HttpUrl
-    support_scope: list[str] = Field(default_factory=list)
+    name: str  # e.g. "Acme Robotics" — used in prompts and the frontend header
+    domain: str  # bare hostname, validated below (no scheme, no path)
+    website: HttpUrl  # full URL, shown to the customer / used for links
+    support_scope: list[str] = Field(default_factory=list)  # e.g. ["orders", "returns"]
 
     @field_validator("domain")
     @classmethod
@@ -82,9 +82,9 @@ class Persona(BaseModel):
     companies set their real CEO's name here. `theme` keys into the frontend's
     theme registry (frontend/src/themes/index.ts)."""
 
-    name: str
-    title: str
-    theme: str = "slate"
+    name: str  # e.g. "Penny" — what the agent calls itself
+    title: str  # e.g. "Front Desk Associate" — shown alongside the name
+    theme: str = "slate"  # one of KNOWN_THEMES below
 
     # Known theme set is shared with frontend/src/themes/index.ts THEMES keys.
     # Kept as a soft check (warn via ValueError) rather than importing the
@@ -116,11 +116,11 @@ class ModelSet(BaseModel):
     """Ollama model ids per tier. Sized up the ladder: the Front Desk handles the
     bulk of traffic and should be the cheapest model that can triage reliably."""
 
-    front_desk: str
-    manager: str
-    vice_president: str
-    ceo: str
-    embedding: str = "nomic-embed-text"
+    front_desk: str  # Ollama model id, e.g. "llama3.2:latest"
+    manager: str  # must support tool-calling — check `ollama show <model>`
+    vice_president: str  # same tool-calling requirement
+    ceo: str  # same; ideally the largest/most capable model in the set
+    embedding: str = "nomic-embed-text"  # used only by backend/rag, not chat
 
     def get(self, tier: Tier) -> str:
         return getattr(self, tier.value)  # type: ignore[no-any-return]

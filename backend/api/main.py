@@ -48,7 +48,9 @@ class ConnectionManager:
         return self._connections.get(session_id)
 
 
-@asynccontextmanager
+@asynccontextmanager  # everything before `yield` runs once at process startup,
+# everything after it runs once at shutdown — FastAPI calls this exactly once
+# and keeps the app alive for the whole `yield`.
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown.
 
@@ -176,8 +178,9 @@ async def public_config() -> dict[str, Any]:
 async def analytics() -> dict[str, Any]:
     """Aggregate escalation analytics — see backend/observability/tracing.py.
 
-    ⚠ No auth (same open question as the WS session — see PLAN.md "Open
-    items"). Fine for local/demo use; close this before any real deployment.
+    ⚠ No auth (same open question as the WS session — see README.md's
+    "Still open" list). Fine for local/demo use; close this before any real
+    deployment.
     """
     from backend.observability.tracing import aggregate_stats
 
@@ -407,9 +410,9 @@ async def chat(websocket: WebSocket, session_id: str) -> None:
     On disconnect, graph state is NOT torn down — the checkpoint is the
     session; a dropped socket is not the end of a conversation.
 
-    TODO(M5): auth. Sessions are currently anonymous and a session_id is
+    TODO: auth. Sessions are currently anonymous and a session_id is
       guessable, so anyone with the id can read the conversation. Must be closed
-      before any real deployment — see PLAN.md "Open items".
+      before any real deployment — see README.md's "Still open" list.
     """
     from langchain_core.messages import HumanMessage
     from langgraph.types import Command

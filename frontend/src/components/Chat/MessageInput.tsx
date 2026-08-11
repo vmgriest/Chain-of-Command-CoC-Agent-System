@@ -62,6 +62,10 @@ export function MessageInput({ send, transitioning, connected }: MessageInputPro
   const submit = (): void => {
     const content = value.trim();
     if (!content || disabled) return;
+    // Optimistic UI: the user's bubble and an empty "typing" agent bubble
+    // both appear immediately, before the server has even received the
+    // message — appendToken() (frontend/src/store/chat.ts) then fills that
+    // agent bubble in as real tokens stream back over the WebSocket.
     appendUserMessage(content);
     startAgentMessage(currentTier);
     send({ type: 'user_message', content });

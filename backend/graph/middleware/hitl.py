@@ -65,6 +65,14 @@ async def request_escalation_consent(
         f"{to_persona.name}, {to_persona.title}, who does?"
     )
 
+    # interrupt() is LangGraph's pause primitive: it serializes this payload out
+    # to the caller (backend/api/main.py forwards it over the WebSocket as the
+    # "escalation_prompt" event) and SUSPENDS this node's execution entirely —
+    # the function call below only returns once the graph is resumed with
+    # Command(resume=<the customer's answer>), which becomes `approved`'s
+    # value. Nothing here re-executes from the top; it picks up right where it
+    # left off, even across a process restart, because the checkpointer
+    # persisted this exact suspension point.
     approved = interrupt(
         {
             "type": "escalation_prompt",

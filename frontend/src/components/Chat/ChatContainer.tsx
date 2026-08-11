@@ -30,6 +30,11 @@ export function ChatContainer(): JSX.Element {
 
   const themeRootRef = useRef<HTMLDivElement>(null);
 
+  // Re-applies the CSS custom properties (--tier-bg, --tier-accent, etc.) onto
+  // the root div every time `theme` changes. Everything downstream (bubbles,
+  // buttons, the accent color) reads those variables in its own CSS rather
+  // than being handed a color directly — see frontend/src/themes/index.ts for
+  // why that's what makes the color shift animate instead of snap.
   useEffect(() => {
     if (themeRootRef.current) {
       applyTheme(themeRootRef.current, theme);

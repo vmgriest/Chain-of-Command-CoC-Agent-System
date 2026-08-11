@@ -42,8 +42,10 @@ def build(model_id: str) -> CompiledStateGraph:
 #   Note: user-initiated escalation is already handled by the supervisor's
 #   classify_intent() on every turn; this would be a Front-Desk-local speedup.
 
-# TODO(M5): input guardrails run here and nowhere else — this is the only tier
-#   that touches unfiltered user input. Prompt injection, PII, abuse, and scope
-#   checks against company.support_scope.
+# Input guardrails (prompt injection, PII, abuse, off-scope) are built, but
+# they don't live in this file — they run once per turn in
+# backend/graph/supervisor.py's guardrail_input_node, gated to Front Desk
+# specifically since it's the only tier that ever sees unfiltered user text
+# (see the module docstring in backend/graph/middleware/guardrails.py).
 
 _ = Tier  # staged for the implementation above

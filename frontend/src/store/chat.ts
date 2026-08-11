@@ -80,6 +80,12 @@ function nextId(prefix: string): string {
   return `${prefix}-${idCounter}-${Date.now()}`;
 }
 
+// create() returns a hook: any component calling useChatStore(selector) both
+// reads the selected slice of state AND automatically re-renders whenever
+// that specific slice changes — no <Provider> wrapper, no manual
+// subscription. `set` merges a partial update into state (like React's
+// setState); `get` reads the current state from inside an action, used below
+// wherever an action needs to see state that isn't in its own arguments.
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: newSessionId(),
   connected: false,

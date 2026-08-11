@@ -3,7 +3,7 @@
 The optimizer loop is exercised with the shared FakeLLM (see conftest.py) —
 same pattern as the rest of the M1 suite. It was additionally live-verified
 by hand against a real Ollama model, catching a genuinely over-promising
-draft and revising it into a policy-compliant one; see CHECKLIST.md.
+draft and revising it into a policy-compliant one.
 """
 
 from __future__ import annotations

@@ -22,6 +22,9 @@ interface EscalationPromptProps {
 export function EscalationPrompt({ event, onRespond }: EscalationPromptProps): JSX.Element {
   const yesRef = useRef<HTMLButtonElement>(null);
 
+  // Moves keyboard focus onto "Yes" the moment this prompt appears, so a
+  // keyboard/screen-reader user lands on the decision immediately instead of
+  // having to tab there from wherever focus happened to be.
   useEffect(() => {
     yesRef.current?.focus();
   }, []);

@@ -32,6 +32,9 @@ class CoCState(TypedDict, total=False):
     """
 
     # --- conversation ---
+    # add_messages is a LangGraph reducer: a node returning {"messages": [...]}
+    # APPENDS to this list (merging on message id if one repeats) instead of
+    # overwriting it outright, the way a plain dict update would.
     messages: Annotated[list, add_messages]
     session_id: str
     ticket_id: str

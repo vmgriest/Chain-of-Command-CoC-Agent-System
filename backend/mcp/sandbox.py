@@ -197,8 +197,8 @@ def _redact_argv_for_log(argv: list[str]) -> str:
 def _docker_run_flags(policy: SandboxPolicy, name: str) -> list[str]:
     flags = [
         "run",
-        "--rm",
-        "-i",
+        "--rm",  # auto-delete the container when it exits — nothing to clean up later
+        "-i",  # keep stdin open, piped — required for the MCP stdio transport to talk to it
         "--name",
         name,
         "--user",

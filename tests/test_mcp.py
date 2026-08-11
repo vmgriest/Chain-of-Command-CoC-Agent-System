@@ -4,8 +4,7 @@ Docker itself is not exercised here — a suite that requires Docker is a suite
 nobody runs (same reasoning as conftest.py's stance on Ollama). Sandbox tests
 check argv construction and the allowlist; registry tests fake
 MultiServerMCPClient. Both were additionally live-verified by hand against a
-real Docker daemon and a real running internal_server.py during development
-— see CHECKLIST.md.
+real Docker daemon and a real running internal_server.py during development.
 """
 
 from __future__ import annotations

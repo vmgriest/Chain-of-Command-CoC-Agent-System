@@ -44,7 +44,7 @@ export function ContextRequest({ event, onSubmit }: ContextRequestProps): JSX.El
       <form
         className="mt-3 flex gap-2"
         onSubmit={(e) => {
-          e.preventDefault();
+          e.preventDefault(); // stop the browser's default full-page navigation/reload on submit
           submit(value);
         }}
       >

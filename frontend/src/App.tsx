@@ -12,9 +12,15 @@ import { useChatStore } from '@/store/chat';
 /** A render crash mid-conversation offers a reload that RECONNECTS to the same
  *  session (sessionId lives in localStorage) rather than discarding it — the
  *  server-side checkpoint still has the conversation. */
+// React error boundaries must be class components — there is no hook
+// equivalent of getDerivedStateFromError. This one catches any render-time
+// exception thrown by ChatContainer or anything inside it and shows a
+// fallback UI instead of a blank white screen.
 class ChatErrorBoundary extends Component<{ children: ReactNode }, { crashed: boolean }> {
   state = { crashed: false };
 
+  // Called by React right after a descendant throws during render. Returning
+  // a new state object here is how the boundary switches to its fallback UI.
   static getDerivedStateFromError(): { crashed: boolean } {
     return { crashed: true };
   }
@@ -43,6 +49,11 @@ export function App(): JSX.Element {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
+    // Guards against a "set state on an unmounted component" warning/race: if
+    // this component unmounts (or the effect re-runs) before fetchConfig()
+    // resolves, the cleanup function below flips `cancelled` so the stale
+    // response's .then()/.catch() becomes a no-op instead of touching state
+    // that no longer belongs to a live component.
     let cancelled = false;
     fetchConfig()
       .then((config) => {
